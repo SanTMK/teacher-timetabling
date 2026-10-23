@@ -221,14 +221,19 @@ Creado con Claude. Registro de las decisiones que la especificación no cubre o 
 
 ## Clases fijas capturadas a mano
 
-- Pantalla **Clases fijas** (lista + formulario) para crear `AsignacionFija` sin una solución
-  previa. Las opciones van en cascada: el grupo limita las asignaturas (solo las de su plan) y
-  los días (los de su nivel); la asignatura limita los profesores (solo los habilitados, más
-  «cualquiera» = `profesor_id` nulo); la hora lista las franjas del nivel y del día, marcando
-  las que caen fuera de la disponibilidad del profesor (se permiten, pero la validación lo
-  objeta).
-- La lista numera las fijas en orden de id, igual que los mensajes «Fija #n» de la validación.
-- Al guardar o seleccionar una fija se muestran en rojo los problemas que la validación le
-  encuentra (choques, disponibilidad), sin impedir guardarla.
-- «Nueva clase fija» conserva las opciones elegidas para capturar varias seguidas.
+- Pantalla **Clases fijas** con arrastrar y soltar (sustituye a la de lista + formulario).
+  Se elige un grupo; a la izquierda, una **paleta** con las asignaturas de su plan
+  («n de h h fijas») y debajo de cada una «cualquiera» (`profesor_id` nulo) y los profesores
+  habilitados; a la derecha, la **semana del grupo** con la misma disposición que
+  Resultados (`cuadricula_grupo` sin asignaciones, recesos en gris).
+- Lo arrastrado viaja como JSON con tipo MIME propio (`application/x-timetabling-fija`). De la
+  paleta a una celda crea la fija; de celda a celda la mueve; de celda a la paleta (o Supr,
+  o clic derecho) la quita, sin confirmación porque se rehace con otro arrastre.
+- Una celda que ya tiene una fija de ese grupo **no acepta** otra (se evita el choque más
+  común en vez de solo avisarlo). Los demás problemas (disponibilidad, choques del profesor
+  con otros grupos, más fijas que horas) se permiten y se listan en rojo bajo la cuadrícula
+  y en la ayuda emergente de la celda (⚠ en lugar de 📌).
+- Al seleccionar un profesor en la paleta se sombrean las horas libres: gris si no está
+  disponible, naranja si preferiría no, rojo si ya tiene una fija en otro grupo que se
+  traslapa (con el margen de traslado).
 - Nueva validación: más fijas de una asignatura en un grupo que sus horas semanales.

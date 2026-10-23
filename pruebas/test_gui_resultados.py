@@ -4,16 +4,20 @@ from pathlib import Path
 
 import openpyxl
 import pytest
-from PySide6.QtCore import QSettings, QTimer
+from PySide6.QtCore import QMimeData, QPoint, QPointF, QSettings, Qt, QTimer
+from PySide6.QtGui import QDropEvent
+from PySide6.QtWidgets import QWidget
 from pytestqt.qtbot import QtBot
 
-from timetabling.dominio.modelos import EstadoSolucion
+from timetabling.dominio.modelos import Disponibilidad, EstadoSolucion
 from timetabling.ejemplo import crear_proyecto_ejemplo
 from timetabling.gui.app import VentanaPrincipal
-from timetabling.gui.pantallas.fijas import PantallaFijas
+from timetabling.gui.pantallas.fijas import SOMBRA_NO_DISPONIBLE, PantallaFijas
 from timetabling.gui.pantallas.generar import PantallaGenerar
 from timetabling.gui.pantallas.resultados import PantallaResultados
+from timetabling.gui.widgets.arrastre import ROL_INFO, CuadriculaFijas, codificar
 from timetabling.gui.widgets.vista_horario import ICONO_FIJA
+from timetabling.nucleo.franjas import franjas_validas_profesor
 from timetabling.nucleo.verificador import verificar
 from timetabling.persistencia.repositorio import Repositorio
 
@@ -153,55 +157,115 @@ def test_errores_de_validacion_impiden_generar(ventana: VentanaPrincipal) -> Non
     assert ventana.pila.currentWidget() is ventana.pantallas["validacion"]
 
 
-def test_capturar_clases_fijas_antes_de_generar(
+def _soltar(widget: QWidget, mime: QMimeData, punto: QPoint) -> bool:
+    """Envía un ``QDropEvent`` como lo haría Qt al terminar un arrastre."""
+    evento = QDropEvent(
+        QPointF(punto),
+        Qt.DropAction.CopyAction | Qt.DropAction.MoveAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    widget.dropEvent(evento)  # type: ignore[attr-defined]
+    return evento.isAccepted()
+
+
+def _centro(cuadricula: CuadriculaFijas, dia: str, indice: int) -> QPoint:
+    item = cuadricula.celda(dia, indice)
+    assert item is not None
+    return cuadricula.visualItemRect(item).center()
+
+
+def test_clases_fijas_arrastrando_antes_de_generar(
     ventana: VentanaPrincipal, qtbot: QtBot, tmp_path: Path
 ) -> None:
     fijas = ventana.mostrar("fijas")
     assert isinstance(fijas, PantallaFijas)
-    assert fijas.lista.count() == 0
     datos = fijas._datos
+    assert not datos.asignaciones_fijas
     grupo = datos.grupos[0]
-    plan = datos.plan_de_grado(grupo.grado_id)
-    asignatura_id = next(iter(plan))
-    habilitados = [
-        p for p in datos.profesores if asignatura_id in p.asignaturas and grupo.grado_id in p.grados
-    ]
-
-    # Las opciones dependen del grupo: solo asignaturas de su plan y profesores habilitados.
     fijas.grupo.setCurrentIndex(fijas.grupo.findData(grupo.id))
-    assert {fijas.asignatura.itemData(i) for i in range(fijas.asignatura.count())} == set(plan)
-    fijas.asignatura.setCurrentIndex(fijas.asignatura.findData(asignatura_id))
-    assert fijas.profesor.count() == len(habilitados) + 1  # + «cualquiera»
-    profesor = habilitados[0]
-    fijas.profesor.setCurrentIndex(fijas.profesor.findData(profesor.id))
-    disponible = next(
-        i for i in range(fijas.hora.count()) if "no está disponible" not in fijas.hora.itemText(i)
+    plan = datos.plan_de_grado(grupo.grado_id)
+
+    # La paleta tiene las asignaturas del plan, cada una con «cualquiera» + habilitados.
+    paleta = fijas.paleta
+    assert paleta.topLevelItemCount() == len(plan)
+    asignatura_item = paleta.topLevelItem(0)
+    profesor_item = asignatura_item.child(1)  # el primero es «cualquiera»
+    info = profesor_item.data(0, ROL_INFO)
+    # Con disponibilidad de un solo día, el resto de la semana queda sombreado.
+    nivel = datos.nivel_de_grupo(grupo)
+    original = datos.profesor(info["profesor_id"])
+    profesor = original.model_copy(
+        update={
+            "disponibilidad": [
+                Disponibilidad(
+                    dia=nivel.dias[0], inicio=nivel.inicio_jornada, fin=nivel.fin_jornada
+                )
+            ]
+        }
     )
-    fijas.hora.setCurrentIndex(disponible)
-    dia, indice = fijas.dia.currentData(), fijas.hora.currentData()
-    assert fijas.guardar()
-    assert fijas.estado.text() == "Cambios guardados."
+    assert ventana.repo is not None
+    ventana.repo.guardar_profesor(profesor)
+    fijas.refrescar()
+    paleta.seleccionar_info(info)
+    profesor_item = paleta.currentItem()
 
-    # Una segunda en la misma franja choca y se avisa al guardar.
-    fijas.nuevo()
-    fijas.profesor.setCurrentIndex(0)
-    assert fijas.guardar()
-    assert "Choca con la fija #1: mismo grupo y misma franja" in fijas.estado.text()
-    assert fijas.lista.count() == 2
-    fijas.confirmar = lambda titulo, texto: True  # type: ignore[method-assign]
-    assert fijas.eliminar()
-    assert fijas.lista.count() == 1
+    # Se sombrean las horas en que el profesor no está disponible; se suelta en una libre.
+    cuadricula = fijas.cuadricula
+    franjas = [f for f in fijas._franjas if f.nivel_id == nivel.id]
+    validas = franjas_validas_profesor(profesor, franjas)
+    libre = next(f for f in franjas if f.id in validas)
+    for f in franjas:
+        celda = cuadricula.celda(f.dia, f.indice)
+        assert celda is not None
+        if f.id not in validas:
+            assert celda.background().color().name().upper() == SOMBRA_NO_DISPONIBLE
+    otra = next(f for f in franjas if f.id in validas and f != libre)
+    assert len(validas) < len(franjas)
+    assert _soltar(
+        cuadricula, paleta.mimeData([profesor_item]), _centro(cuadricula, libre.dia, libre.indice)
+    )
+    fija = fijas._datos.asignaciones_fijas[0]
+    assert (fija.grupo_id, fija.asignatura_id, fija.profesor_id) == (
+        grupo.id,
+        info["asignatura_id"],
+        profesor.id,
+    )
+    assert "1 de" in paleta.topLevelItem(0).text(0)
 
+    # Una casilla ocupada no acepta otra clase; la clase sí se puede mover a otra hora.
+    cualquiera = paleta.topLevelItem(0).child(0)
+    assert not _soltar(
+        cuadricula, paleta.mimeData([cualquiera]), _centro(cuadricula, libre.dia, libre.indice)
+    )
+    celda = cuadricula.celda(libre.dia, libre.indice)
+    assert celda is not None
+    mover = codificar(celda.data(ROL_INFO))
+    assert _soltar(cuadricula, mover, _centro(cuadricula, otra.dia, otra.indice))
+    fija = fijas._datos.asignaciones_fijas[0]
+    assert (fija.dia, fija.indice_franja) == (otra.dia, otra.indice)
+
+    # Una segunda clase devuelta a la paleta se elimina.
+    assert _soltar(
+        cuadricula,
+        paleta.mimeData([paleta.topLevelItem(0).child(0)]),
+        _centro(cuadricula, libre.dia, libre.indice),
+    )
+    assert len(fijas._datos.asignaciones_fijas) == 2
+    celda = cuadricula.celda(libre.dia, libre.indice)
+    assert celda is not None
+    assert _soltar(paleta, codificar(celda.data(ROL_INFO)), QPoint(5, 5))
+    assert len(fijas._datos.asignaciones_fijas) == 1
+
+    ventana.repo.guardar_profesor(original)  # disponibilidad completa para resolver
     generar = _generar(ventana, qtbot, limite=10)
     _esperar(qtbot, generar)
     assert generar.ultima_solucion_id is not None
     with Repositorio.abrir(ventana.repo.ruta) as repo:  # type: ignore[union-attr]
         solucion = repo.cargar_solucion(generar.ultima_solucion_id)
     assert any(
-        a.grupo_id == grupo.id
-        and a.asignatura_id == asignatura_id
-        and a.profesor_id == profesor.id
-        and a.dia == dia
-        and a.indice == indice
+        (a.grupo_id, a.asignatura_id, a.profesor_id, a.dia, a.indice)
+        == (grupo.id, fija.asignatura_id, profesor.id, otra.dia, otra.indice)
         for a in solucion.asignaciones
     )
