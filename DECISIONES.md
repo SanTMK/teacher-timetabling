@@ -161,8 +161,7 @@ Creado con Claude. Registro de las decisiones que la especificación no cubre o 
   saturaban la cuadrícula cuando el profesor atiende varios niveles.
 - **Proyectos recientes** se guardan con `QSettings` (local).
 - **Guardar como** copia el archivo y continúa trabajando sobre la copia.
-- Los problemas de validación de **asignaciones fijas** llevan, por ahora, a Grados y grupos;
-  la edición de fijas llega con la pantalla de Resultados (Fase 5).
+- Los problemas de validación de **asignaciones fijas** llevan a la pantalla *Clases fijas*.
 - `colores.py` (contraste de texto) vive en `dominio/` porque lo usarán la interfaz y la
   exportación, y la exportación no puede depender de la interfaz.
 
@@ -219,3 +218,17 @@ Creado con Claude. Registro de las decisiones que la especificación no cubre o 
   bloqueada por `sandbox-exec (deny network*)` resuelve igual y la interfaz arranca. El
   ejecutable no enlaza con ningún Python externo (`otool -L`). **No verificado:** una máquina
   distinta, Windows y macOS Intel (hay que construir en cada plataforma).
+
+## Clases fijas capturadas a mano
+
+- Pantalla **Clases fijas** (lista + formulario) para crear `AsignacionFija` sin una solución
+  previa. Las opciones van en cascada: el grupo limita las asignaturas (solo las de su plan) y
+  los días (los de su nivel); la asignatura limita los profesores (solo los habilitados, más
+  «cualquiera» = `profesor_id` nulo); la hora lista las franjas del nivel y del día, marcando
+  las que caen fuera de la disponibilidad del profesor (se permiten, pero la validación lo
+  objeta).
+- La lista numera las fijas en orden de id, igual que los mensajes «Fija #n» de la validación.
+- Al guardar o seleccionar una fija se muestran en rojo los problemas que la validación le
+  encuentra (choques, disponibilidad), sin impedir guardarla.
+- «Nueva clase fija» conserva las opciones elegidas para capturar varias seguidas.
+- Nueva validación: más fijas de una asignatura en un grupo que sus horas semanales.

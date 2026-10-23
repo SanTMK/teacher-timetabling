@@ -51,6 +51,7 @@ archivo de su escuela. A la izquierda verá las secciones; recórralas en orden:
 | **Plan de estudios** | Escriba cuántas horas por semana lleva cada asignatura en cada grado. La columna *Total* se pone en rojo si no caben. |
 | **Profesores** | Marque qué asignaturas y grados puede dar cada uno, y **pinte su disponibilidad** arrastrando el ratón sobre la cuadrícula (verde: disponible; naranja: preferiría no). *Copiar día a toda la semana* ahorra tiempo. |
 | **Espacios** | Salones especiales y cuántos hay de cada tipo. |
+| **Clases fijas** | (Opcional) Asigne a mano un profesor a un grupo, asignatura, día y hora. El horario generado respetará esas clases. |
 | **Validación** | Revisa que no falte nada. Haga doble clic en un problema para ir directo a corregirlo. |
 | **Generar** | Pulse **Generar horario**. Puede seguir mirando el programa mientras calcula; *Cancelar* se queda con el mejor horario encontrado hasta ese momento. |
 | **Resultados** | Horarios por grupo, por profesor y por salón; resumen y carga de cada docente; **Exportar a Excel…**. |
@@ -60,7 +61,11 @@ escribir cada número).
 
 ### Ajustar a mano
 
-En **Resultados**, haga **clic derecho** sobre una clase → **Fijar esta clase** (aparece 📌).
+Antes de generar, en **Clases fijas** pulse *Nueva clase fija*, elija grupo, asignatura,
+profesor (o «cualquiera» para que lo elija el programa), día y hora, y pulse **Guardar**. Si
+la clase choca con otra o el profesor no está disponible, se avisa en rojo.
+
+También puede ajustar después de generar: en **Resultados**, haga **clic derecho** sobre una clase → **Fijar esta clase** (aparece 📌).
 Vuelva a **Generar**: el nuevo horario respetará las clases fijas y acomodará lo demás.
 Para quitarla, clic derecho → **Desfijar esta clase**.
 

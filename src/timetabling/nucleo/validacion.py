@@ -276,6 +276,21 @@ def _asignaciones_fijas(
                 )
         ubicadas.append((i, fija.grupo_id, fija.profesor_id, franja))
 
+    por_clase: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for i, fija in enumerate(datos.asignaciones_fijas):
+        por_clase[(fija.grupo_id, fija.asignatura_id)].append(i)
+    for (grupo_id, asignatura_id), indices in por_clase.items():
+        horas = datos.plan_de_grado(datos.grupo(grupo_id).grado_id).get(asignatura_id, 0)
+        if 0 < horas < len(indices):
+            problemas.append(
+                problema(
+                    indices[horas],
+                    f"{datos.asignatura(asignatura_id).nombre} de "
+                    f"{datos.nombre_grupo(datos.grupo(grupo_id))} tiene {len(indices)} clases "
+                    f"fijas, pero solo {horas} hora(s) por semana",
+                )
+            )
+
     for k, (i, g1, p1, f1) in enumerate(ubicadas):
         for j, g2, p2, f2 in ubicadas[k + 1 :]:
             if g1 == g2 and f1.id == f2.id:

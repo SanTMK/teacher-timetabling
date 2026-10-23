@@ -26,7 +26,7 @@ _ENTIDADES = {
     "plan": "Plan de estudios",
     "profesores": "Profesores",
     "espacios": "Espacios",
-    "asignaciones_fijas": "Asignaciones fijas",
+    "asignaciones_fijas": "Clases fijas",
 }
 
 

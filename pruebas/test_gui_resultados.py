@@ -10,6 +10,7 @@ from pytestqt.qtbot import QtBot
 from timetabling.dominio.modelos import EstadoSolucion
 from timetabling.ejemplo import crear_proyecto_ejemplo
 from timetabling.gui.app import VentanaPrincipal
+from timetabling.gui.pantallas.fijas import PantallaFijas
 from timetabling.gui.pantallas.generar import PantallaGenerar
 from timetabling.gui.pantallas.resultados import PantallaResultados
 from timetabling.gui.widgets.vista_horario import ICONO_FIJA
@@ -150,3 +151,57 @@ def test_errores_de_validacion_impiden_generar(ventana: VentanaPrincipal) -> Non
     assert generar.boton_validacion.isVisibleTo(generar)
     generar.boton_validacion.click()
     assert ventana.pila.currentWidget() is ventana.pantallas["validacion"]
+
+
+def test_capturar_clases_fijas_antes_de_generar(
+    ventana: VentanaPrincipal, qtbot: QtBot, tmp_path: Path
+) -> None:
+    fijas = ventana.mostrar("fijas")
+    assert isinstance(fijas, PantallaFijas)
+    assert fijas.lista.count() == 0
+    datos = fijas._datos
+    grupo = datos.grupos[0]
+    plan = datos.plan_de_grado(grupo.grado_id)
+    asignatura_id = next(iter(plan))
+    habilitados = [
+        p for p in datos.profesores if asignatura_id in p.asignaturas and grupo.grado_id in p.grados
+    ]
+
+    # Las opciones dependen del grupo: solo asignaturas de su plan y profesores habilitados.
+    fijas.grupo.setCurrentIndex(fijas.grupo.findData(grupo.id))
+    assert {fijas.asignatura.itemData(i) for i in range(fijas.asignatura.count())} == set(plan)
+    fijas.asignatura.setCurrentIndex(fijas.asignatura.findData(asignatura_id))
+    assert fijas.profesor.count() == len(habilitados) + 1  # + «cualquiera»
+    profesor = habilitados[0]
+    fijas.profesor.setCurrentIndex(fijas.profesor.findData(profesor.id))
+    disponible = next(
+        i for i in range(fijas.hora.count()) if "no está disponible" not in fijas.hora.itemText(i)
+    )
+    fijas.hora.setCurrentIndex(disponible)
+    dia, indice = fijas.dia.currentData(), fijas.hora.currentData()
+    assert fijas.guardar()
+    assert fijas.estado.text() == "Cambios guardados."
+
+    # Una segunda en la misma franja choca y se avisa al guardar.
+    fijas.nuevo()
+    fijas.profesor.setCurrentIndex(0)
+    assert fijas.guardar()
+    assert "Choca con la fija #1: mismo grupo y misma franja" in fijas.estado.text()
+    assert fijas.lista.count() == 2
+    fijas.confirmar = lambda titulo, texto: True  # type: ignore[method-assign]
+    assert fijas.eliminar()
+    assert fijas.lista.count() == 1
+
+    generar = _generar(ventana, qtbot, limite=10)
+    _esperar(qtbot, generar)
+    assert generar.ultima_solucion_id is not None
+    with Repositorio.abrir(ventana.repo.ruta) as repo:  # type: ignore[union-attr]
+        solucion = repo.cargar_solucion(generar.ultima_solucion_id)
+    assert any(
+        a.grupo_id == grupo.id
+        and a.asignatura_id == asignatura_id
+        and a.profesor_id == profesor.id
+        and a.dia == dia
+        and a.indice == indice
+        for a in solucion.asignaciones
+    )
