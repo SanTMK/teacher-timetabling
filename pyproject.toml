@@ -1,0 +1,43 @@
+[project]
+name = "timetabling"
+version = "0.1.0"
+description = "Generador local de horarios escolares (preescolar, primaria y secundaria)"
+readme = "README.md"
+authors = [
+    { name = "SanTMK", email = "64996803+SanTMK@users.noreply.github.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "ortools>=9.15.6755",
+    "pydantic>=2",
+    "pyside6>=6.12.0",
+    "typer>=0.27.3",
+    "xlsxwriter>=3.3.0",
+]
+
+[project.scripts]
+timetabling = "timetabling.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "openpyxl>=3.1.5",
+    "pyinstaller>=6.22.3",
+    "pytest>=9.1.1",
+    "pytest-qt>=4.5.0",
+    "ruff>=0.17.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["pruebas"]
+markers = ["lento: pruebas que resuelven el ejemplo mediano (omitir con -m 'not lento')"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
