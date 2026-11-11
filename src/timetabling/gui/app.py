@@ -25,7 +25,9 @@ from PySide6.QtWidgets import (
 from timetabling.gui.pantallas.asignaturas import PantallaAsignaturas
 from timetabling.gui.pantallas.base import Pantalla
 from timetabling.gui.pantallas.configuracion import PantallaConfiguracion
+from timetabling.gui.pantallas.docentes import PantallaDocentes
 from timetabling.gui.pantallas.espacios import PantallaEspacios
+from timetabling.gui.pantallas.fijas import PantallaFijas
 from timetabling.gui.pantallas.generar import PantallaGenerar
 from timetabling.gui.pantallas.grados_grupos import PantallaGradosGrupos
 from timetabling.gui.pantallas.niveles import PantallaNiveles
@@ -48,7 +50,8 @@ _PANTALLA_DE_ENTIDAD = {
     "plan": "plan",
     "profesores": "profesores",
     "espacios": "espacios",
-    "asignaciones_fijas": "grados",
+    "asignaciones_fijas": "fijas",
+    "docentes": "docentes",
 }
 
 
@@ -66,7 +69,9 @@ class VentanaPrincipal(QMainWindow):
             "asignaturas": PantallaAsignaturas(),
             "plan": PantallaPlan(),
             "profesores": PantallaProfesores(),
+            "docentes": PantallaDocentes(),
             "espacios": PantallaEspacios(),
+            "fijas": PantallaFijas(),
             "validacion": PantallaValidacion(),
             "generar": PantallaGenerar(),
             "resultados": PantallaResultados(),

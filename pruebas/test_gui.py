@@ -269,3 +269,26 @@ def test_icono_de_la_aplicacion(qtbot: QtBot) -> None:
     icono = icono_aplicacion()
     assert not icono.isNull()
     assert icono.availableSizes()
+
+
+def test_niveles_hora_con_duracion_distinta(ventana: VentanaPrincipal, tmp_path: Path) -> None:
+    ventana.nuevo_proyecto(tmp_path / "escuela.horario")
+    niveles = _pantalla(ventana, "niveles", PantallaNiveles)
+    niveles.nuevo()
+    niveles.nombre.setText("Primaria")
+    niveles.duracion.setValue(45)
+    poner_hora(niveles.inicio, a_minutos("08:00"))
+    poner_hora(niveles.fin, a_minutos("10:10"))
+    assert niveles.resumen_franjas.text().startswith("2 franjas por día")
+
+    niveles.agregar_hora_nueva()  # propone la hora 3 con la duración general
+    niveles.especiales.cellWidget(0, 1).setValue(40)
+    assert niveles.resumen_franjas.text().startswith("3 franjas por día")
+    assert niveles.vista_franjas.item(2).text() == "3. 09:30–10:10   (40 min)"
+    assert niveles.guardar()
+    assert ventana.repo is not None
+    assert ventana.repo.listar_niveles()[0].duraciones_especiales == {2: 40}
+
+    niveles.agregar_especial(3, 30)  # repetida: no se guarda
+    assert niveles.error_especiales.text()
+    assert not niveles.guardar()

@@ -21,12 +21,14 @@ from timetabling.dominio.modelos import (
     DIAS_VALIDOS,
     Asignacion,
     DatosEscuela,
+    Evento,
     Franja,
     Nivel,
     a_hhmm,
 )
 
 PASO_PROPORCIONAL = 5
+COLOR_EVENTO = "#9BE7F5"  # celeste, como en el cuadro de la escuela
 
 
 @dataclass(frozen=True)
@@ -126,6 +128,33 @@ def _bloques_por_franja(
     return bloques
 
 
+def _bloques_eventos(
+    nivel: Nivel,
+    eventos: list[Evento],
+    franjas: list[Franja],
+    columnas: list[str],
+    fila_de: dict[int, int],
+) -> list[Bloque]:
+    """Un bloque celeste por cada franja del nivel que ocupa uno de ``eventos``."""
+    bloques = []
+    for f in franjas:
+        if f.nivel_id != nivel.id or f.dia not in columnas or f.indice not in fila_de:
+            continue
+        evento = next((e for e in eventos if e.toca(f.dia, f.inicio, f.fin)), None)
+        if evento is not None:
+            bloques.append(
+                Bloque(
+                    fila=fila_de[f.indice],
+                    filas=1,
+                    columna=columnas.index(f.dia),
+                    titulo=evento.nombre,
+                    detalle="",
+                    color=COLOR_EVENTO,
+                )
+            )
+    return bloques
+
+
 def cuadricula_grupo(
     datos: DatosEscuela, franjas: list[Franja], asignaciones: list[Asignacion], grupo_id: int
 ) -> Cuadricula:
@@ -142,7 +171,8 @@ def cuadricula_grupo(
         titulo=f"Grupo {datos.nombre_grupo(grupo)} · {nivel.nombre}",
         columnas=list(nivel.dias),
         filas=filas,
-        bloques=_bloques_por_franja(propias, list(nivel.dias), fila_de, textos),
+        bloques=_bloques_por_franja(propias, list(nivel.dias), fila_de, textos)
+        + _bloques_eventos(nivel, nivel.eventos, franjas, list(nivel.dias), fila_de),
     )
 
 
@@ -181,7 +211,10 @@ def cuadricula_profesor(
             titulo=f"{titulo} · {nivel.nombre}",
             columnas=list(nivel.dias),
             filas=filas,
-            bloques=_bloques_por_franja(propias, list(nivel.dias), fila_de, textos),
+            bloques=_bloques_por_franja(propias, list(nivel.dias), fila_de, textos)
+            + _bloques_eventos(
+                nivel, datos.eventos_de(profesor), franjas, list(nivel.dias), fila_de
+            ),
         )
 
     # Varios niveles: escala de tiempo proporcional.
@@ -212,6 +245,21 @@ def cuadricula_profesor(
                 detalle=f"{detalle} · {a_hhmm(franja.inicio)}–{a_hhmm(franja.fin)}",
                 color=color,
                 asignaciones=[a],
+            )
+        )
+    for evento in datos.eventos_de(profesor):
+        if evento.dia not in columnas or evento.fin <= inicio or evento.inicio >= fin:
+            continue
+        fila = (max(evento.inicio, inicio) - inicio) // PASO_PROPORCIONAL
+        ultima = math.ceil((min(evento.fin, fin) - inicio) / PASO_PROPORCIONAL)
+        bloques.append(
+            Bloque(
+                fila=fila,
+                filas=max(1, ultima - fila),
+                columna=columnas.index(evento.dia),
+                titulo=evento.nombre,
+                detalle=f"{a_hhmm(evento.inicio)}–{a_hhmm(evento.fin)}",
+                color=COLOR_EVENTO,
             )
         )
     return Cuadricula(

@@ -27,7 +27,7 @@ from timetabling.nucleo.franjas import (
     adyacentes,
     cliques_maximales,
     franjas_validas_profesor,
-    generar_franjas,
+    generar_franjas_utiles,
     matriz_traslapes,
 )
 
@@ -42,6 +42,7 @@ from timetabling.nucleo.franjas import (
 #   ("bloque", g, a)      D11
 #   ("sin_huecos", g)     D12
 #   ("fija", indice)      D13
+#   ("docente", indice)   D14
 Clave = tuple[object, ...]
 ClaveX = tuple[int, int, int, str]
 
@@ -102,7 +103,8 @@ class ModeloHorario:
 
 def construir_modelo(datos: DatosEscuela, con_suposiciones: bool = False) -> ModeloHorario:
     """Construye el modelo CP-SAT con todas las restricciones duras."""
-    franjas = generar_franjas(datos)
+    # Las franjas que ocupa un evento del nivel (hora cívica) no existen para el modelo.
+    franjas = generar_franjas_utiles(datos)
     por_nivel_dia: dict[tuple[int, str], list[Franja]] = defaultdict(list)
     for franja in franjas:
         por_nivel_dia[(franja.nivel_id, franja.dia)].append(franja)
@@ -112,7 +114,10 @@ def construir_modelo(datos: DatosEscuela, con_suposiciones: bool = False) -> Mod
         franjas={f.id: f for f in franjas},
         franjas_por_nivel_dia=dict(por_nivel_dia),
         traslapes=matriz_traslapes(franjas, datos.configuracion.margen_traslado_min),
-        validas={p.id: franjas_validas_profesor(p, franjas) for p in datos.profesores},
+        validas={
+            p.id: franjas_validas_profesor(p, franjas, datos.eventos_de(p))
+            for p in datos.profesores
+        },
         con_suposiciones=con_suposiciones,
     )
     mh.cliques = cliques_maximales(mh.traslapes)
@@ -127,6 +132,7 @@ def construir_modelo(datos: DatosEscuela, con_suposiciones: bool = False) -> Mod
     _d11_bloques_dobles(mh)
     _d12_sin_huecos_alumnos(mh)
     _d13_asignaciones_fijas(mh)
+    _d14_docentes_asignados(mh)
     return mh
 
 
@@ -375,3 +381,20 @@ def _d13_asignaciones_fijas(mh: ModeloHorario) -> None:
                 mh.modelo.add_bool_or([literal.Not()])
             continue
         mh.agregar(mh.suma(claves) == 1, clave)
+
+
+def _d14_docentes_asignados(mh: ModeloHorario) -> None:
+    """D14: la asignatura de un grupo la da el profesor asignado."""
+    for i, docente in enumerate(mh.datos.docentes_asignados):
+        g, a, p = docente.grupo_id, docente.asignatura_id, docente.profesor_id
+        otros = [y for (gg, aa, pp), y in mh.y.items() if gg == g and aa == a and pp != p]
+        clave = ("docente", i)
+        for y in otros:
+            mh.agregar(y == 0, clave)
+        if (g, a, p) not in mh.y and (g, a) in mh.por_ga:
+            # El asignado no puede darla (no habilitado o sin franjas disponibles).
+            literal = mh.literal(clave)
+            if literal is None:
+                mh.modelo.add_bool_or([])
+            else:
+                mh.modelo.add_bool_or([literal.Not()])

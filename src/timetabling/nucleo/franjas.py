@@ -7,6 +7,7 @@ from collections import defaultdict
 from timetabling.dominio.modelos import (
     DatosEscuela,
     Disponibilidad,
+    Evento,
     Franja,
     Nivel,
     Profesor,
@@ -17,8 +18,9 @@ from timetabling.dominio.modelos import (
 def generar_franjas_nivel(nivel: Nivel) -> list[Franja]:
     """Genera las franjas consecutivas de cada día lectivo del nivel.
 
-    Si una franja chocaría con un receso, la siguiente comienza al terminar el receso.
-    Se detiene cuando la franja ya no cabe antes del fin de la jornada.
+    Cada franja dura ``nivel.duracion_franja(indice)``: la duración general del nivel o la
+    especial de esa hora. Si una franja chocaría con un receso, comienza al terminar el
+    receso. Se detiene cuando la franja ya no cabe antes del fin de la jornada.
     """
     if nivel.id is None:
         raise ValueError(f"El nivel «{nivel.nombre}» no tiene id")
@@ -29,7 +31,7 @@ def generar_franjas_nivel(nivel: Nivel) -> list[Franja]:
         indice = 0
         receso_pendiente = False
         while True:
-            fin = inicio + nivel.duracion_min
+            fin = inicio + nivel.duracion_franja(indice)
             if fin > nivel.fin_jornada:
                 break
             choque = next((r for r in recesos if inicio < r.fin and r.inicio < fin), None)
@@ -56,6 +58,22 @@ def generar_franjas_nivel(nivel: Nivel) -> list[Franja]:
 def generar_franjas(datos: DatosEscuela) -> list[Franja]:
     """Franjas de todos los niveles."""
     return [f for nivel in datos.niveles for f in generar_franjas_nivel(nivel)]
+
+
+def evento_de_franja(franja: Franja, nivel: Nivel) -> Evento | None:
+    """El evento del nivel que ocupa la franja (los grupos no tienen clase en ella)."""
+    return next((e for e in nivel.eventos if e.toca(franja.dia, franja.inicio, franja.fin)), None)
+
+
+def franjas_utiles_nivel(nivel: Nivel) -> list[Franja]:
+    """Franjas del nivel en que puede haber clase (sin las que ocupa un evento).
+
+    Las franjas conservan su índice: un evento en la primera hora no corre las demás."""
+    return [f for f in generar_franjas_nivel(nivel) if evento_de_franja(f, nivel) is None]
+
+
+def generar_franjas_utiles(datos: DatosEscuela) -> list[Franja]:
+    return [f for nivel in datos.niveles for f in franjas_utiles_nivel(nivel)]
 
 
 def separadas_por_receso(a: Franja, b: Franja) -> bool:
@@ -159,11 +177,16 @@ def tipo_disponibilidad(
 
 
 def franjas_validas_profesor(
-    profesor: Profesor, franjas: list[Franja]
+    profesor: Profesor, franjas: list[Franja], eventos: list[Evento] | None = None
 ) -> dict[str, TipoDisponibilidad]:
-    """``franja_id → tipo`` de las franjas en que el profesor puede dar clase."""
+    """``franja_id → tipo`` de las franjas en que el profesor puede dar clase.
+
+    ``eventos`` son los eventos a los que asiste: las franjas que se cruzan con ellos no
+    son válidas, sea cual sea el nivel."""
     validas: dict[str, TipoDisponibilidad] = {}
     for franja in franjas:
+        if eventos and any(e.toca(franja.dia, franja.inicio, franja.fin) for e in eventos):
+            continue
         tipo = tipo_disponibilidad(franja, profesor.disponibilidad)
         if tipo is not None:
             validas[franja.id] = tipo

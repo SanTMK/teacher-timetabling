@@ -32,6 +32,7 @@ _NOMBRES_TABLA = {
     "grupos": "el grupo",
     "asignaturas": "la asignatura",
     "profesores": "el profesor",
+    "asignaciones_fijas": "la clase fija",
 }
 
 

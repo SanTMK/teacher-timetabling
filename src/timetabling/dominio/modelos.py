@@ -137,6 +137,37 @@ class Receso(_Base):
         return self
 
 
+class Evento(_Base):
+    """Actividad de todo el nivel en un día y hora (p. ej. la hora cívica). Los grupos del
+    nivel no tienen clase en las franjas que toca, y los profesores que asisten tampoco
+    pueden dar clase en ningún nivel a esa hora."""
+
+    id: int | None = None
+    nivel_id: int | None = None
+    nombre: str = "Hora cívica"
+    dia: str
+    inicio: int
+    fin: int
+
+    _nombre = field_validator("nombre")(_validar_nombre)
+
+    @field_validator("dia")
+    @classmethod
+    def _dia(cls, dia: str) -> str:
+        if dia not in DIAS_VALIDOS:
+            raise ValueError(f"Día inválido: {dia!r}")
+        return dia
+
+    @model_validator(mode="after")
+    def _rango(self) -> Evento:
+        _validar_rango(self.inicio, self.fin, f"Evento «{self.nombre}»")
+        return self
+
+    def toca(self, dia: str, inicio: int, fin: int) -> bool:
+        """Verdadero si el evento se cruza con ese día y rango de horas."""
+        return self.dia == dia and self.inicio < fin and inicio < self.fin
+
+
 class Nivel(_Base):
     id: int | None = None
     nombre: str
@@ -145,9 +176,29 @@ class Nivel(_Base):
     fin_jornada: int
     dias: list[str] = Field(default_factory=lambda: list(DIAS_SEMANA))
     recesos: list[Receso] = Field(default_factory=list)
+    eventos: list[Evento] = Field(default_factory=list)
     sin_huecos_alumnos: bool = False
+    # Índice de franja (0 = primera hora del día) → duración en minutos, para las horas
+    # que no duran ``duracion_min`` (p. ej. una última hora más corta).
+    duraciones_especiales: dict[int, int] = Field(default_factory=dict)
 
     _nombre = field_validator("nombre")(_validar_nombre)
+
+    @field_validator("duraciones_especiales")
+    @classmethod
+    def _duraciones(cls, duraciones: dict[int, int]) -> dict[int, int]:
+        for indice, minutos in duraciones.items():
+            if indice < 0:
+                raise ValueError(f"Número de hora inválido: {indice + 1}")
+            if not 5 <= minutos <= 240:
+                raise ValueError(
+                    f"La hora {indice + 1} debe durar entre 5 y 240 minutos ({minutos})"
+                )
+        return dict(sorted(duraciones.items()))
+
+    def duracion_franja(self, indice: int) -> int:
+        """Duración en minutos de la franja ``indice`` (0 = primera hora del día)."""
+        return self.duraciones_especiales.get(indice, self.duracion_min)
 
     @field_validator("dias")
     @classmethod
@@ -251,6 +302,8 @@ class Profesor(_Base):
     asignaturas: set[int] = Field(default_factory=set)
     grados: set[int] = Field(default_factory=set)
     disponibilidad: list[Disponibilidad] = Field(default_factory=list)
+    # Ids de los eventos (p. ej. horas cívicas) a los que asiste: a esa hora no da clase.
+    eventos: set[int] = Field(default_factory=set)
     carga_max_semanal_min: int = Field(2400, ge=0)
     carga_max_diaria_min: int = Field(480, ge=0)
     max_consecutivas: int = Field(4, ge=1)
@@ -275,6 +328,15 @@ class AsignacionFija(_Base):
     profesor_id: int | None = None
     dia: str
     indice_franja: int = Field(ge=0)
+
+
+class DocenteAsignado(_Base):
+    """Profesor que da ``asignatura`` a ``grupo``. El generador lo respeta y solo decide
+    en qué franjas van esas clases."""
+
+    grupo_id: int
+    asignatura_id: int
+    profesor_id: int
 
 
 class Franja(_Base):
@@ -339,6 +401,7 @@ class DatosEscuela(_Base):
     profesores: list[Profesor] = Field(default_factory=list)
     espacios: list[Espacio] = Field(default_factory=list)
     asignaciones_fijas: list[AsignacionFija] = Field(default_factory=list)
+    docentes_asignados: list[DocenteAsignado] = Field(default_factory=list)
 
     # --- Búsquedas de conveniencia -------------------------------------------------
 
@@ -357,6 +420,18 @@ class DatosEscuela(_Base):
     def profesor(self, profesor_id: int) -> Profesor:
         return next(p for p in self.profesores if p.id == profesor_id)
 
+    def eventos(self) -> list[Evento]:
+        """Todos los eventos de todos los niveles."""
+        return [e for n in self.niveles for e in n.eventos]
+
+    def eventos_de(self, profesor: Profesor) -> list[Evento]:
+        """Eventos a los que asiste el profesor."""
+        return [e for e in self.eventos() if e.id in profesor.eventos]
+
+    def niveles_de(self, profesor: Profesor) -> set[int]:
+        """Ids de los niveles en que da clase el profesor (según sus grados)."""
+        return {g.nivel_id for g in self.grados if g.id in profesor.grados}
+
     def nivel_de_grupo(self, grupo: Grupo) -> Nivel:
         return self.nivel(self.grado(grupo.grado_id).nivel_id)
 
@@ -370,6 +445,18 @@ class DatosEscuela(_Base):
             for p in self.plan
             if p.grado_id == grado_id and p.horas_semanales > 0
         }
+
+    def docente_asignado(self, grupo_id: int, asignatura_id: int) -> int | None:
+        """Id del profesor asignado a ``asignatura`` en ``grupo`` (``None`` si lo decide
+        el generador)."""
+        return next(
+            (
+                d.profesor_id
+                for d in self.docentes_asignados
+                if d.grupo_id == grupo_id and d.asignatura_id == asignatura_id
+            ),
+            None,
+        )
 
     def capacidad_espacios(self) -> dict[str, int]:
         """Tipo de espacio → cantidad total disponible."""

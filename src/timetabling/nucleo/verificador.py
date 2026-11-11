@@ -81,6 +81,8 @@ def verificar(datos: DatosEscuela, asignaciones: list[Asignacion]) -> list[Viola
         _d11_bloque_doble,
         _d12_sin_huecos,
         _d13_fijas,
+        _d14_docentes,
+        _d15_eventos,
     ):
         violaciones.extend(revision(cx))
     return violaciones
@@ -390,6 +392,65 @@ def _d13_fijas(cx: _Contexto) -> list[Violacion]:
                     f"No se respetó la asignación fija de {cx.nombre_asig(fija.asignatura_id)} "
                     f"en {cx.nombre_grupo(fija.grupo_id)} el {fija.dia}, franja "
                     f"{fija.indice_franja + 1}",
+                )
+            )
+    return v
+
+
+def _d14_docentes(cx: _Contexto) -> list[Violacion]:
+    v: list[Violacion] = []
+    for docente in cx.datos.docentes_asignados:
+        otros = {
+            a.profesor_id
+            for a in cx.asignaciones
+            if a.grupo_id == docente.grupo_id
+            and a.asignatura_id == docente.asignatura_id
+            and a.profesor_id != docente.profesor_id
+        }
+        for profesor_id in sorted(otros):
+            v.append(
+                Violacion(
+                    "D14",
+                    f"{cx.nombre_asig(docente.asignatura_id)} en "
+                    f"{cx.nombre_grupo(docente.grupo_id)} está asignada a "
+                    f"{cx.nombre_prof(docente.profesor_id)}, pero la da "
+                    f"{cx.nombre_prof(profesor_id)}",
+                )
+            )
+    return v
+
+
+def _d15_eventos(cx: _Contexto) -> list[Violacion]:
+    """Ninguna clase en un evento del nivel del grupo ni de un profesor que asiste."""
+    v: list[Violacion] = []
+    for a in cx.asignaciones:
+        franja = cx.franja(a)
+        if franja is None:
+            continue
+        nivel = cx.datos.nivel_de_grupo(cx.datos.grupo(a.grupo_id))
+        evento = next(
+            (e for e in nivel.eventos if e.toca(franja.dia, franja.inicio, franja.fin)), None
+        )
+        if evento is not None:
+            v.append(Violacion("D15", f"Clase durante «{evento.nombre}»: {cx.describir(a)}"))
+            continue
+        profesor = next((p for p in cx.datos.profesores if p.id == a.profesor_id), None)
+        if profesor is None:
+            continue
+        evento = next(
+            (
+                e
+                for e in cx.datos.eventos_de(profesor)
+                if e.toca(franja.dia, franja.inicio, franja.fin)
+            ),
+            None,
+        )
+        if evento is not None:
+            v.append(
+                Violacion(
+                    "D15",
+                    f"{profesor.nombre} asiste a «{evento.nombre}» y tiene clase a esa hora: "
+                    f"{cx.describir(a)}",
                 )
             )
     return v

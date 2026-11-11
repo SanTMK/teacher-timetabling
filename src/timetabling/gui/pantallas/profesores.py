@@ -19,9 +19,11 @@ from PySide6.QtWidgets import (
 
 from timetabling.dominio.modelos import (
     DIAS_VALIDOS,
+    NOMBRES_DIAS,
     DatosEscuela,
     Profesor,
     TipoDisponibilidad,
+    a_hhmm,
 )
 from timetabling.gui.pantallas.base import PantallaListaFormulario
 from timetabling.gui.widgets.disponibilidad import COLORES, EditorDisponibilidad
@@ -66,6 +68,8 @@ class PantallaProfesores(PantallaListaFormulario):
         self.asignaturas = _lista_casillas()
         self.grados = _lista_casillas()
         self.grados.itemChanged.connect(self._actualizar_referencia)
+        self.eventos = _lista_casillas()
+        self.eventos.setToolTip("Eventos a los que asiste: a esa hora no da clase en ningún nivel")
 
         self.errores.fila(self.formulario, "nombre", "Nombre", self.nombre)
         self.errores.fila(
@@ -79,6 +83,7 @@ class PantallaProfesores(PantallaListaFormulario):
         )
         self.errores.fila(self.formulario, "asignaturas", "Asignaturas", self.asignaturas)
         self.errores.fila(self.formulario, "grados", "Grados", self.grados)
+        self.errores.fila(self.formulario, "eventos", "Asiste a", self.eventos)
 
         self.editor = EditorDisponibilidad()
         caja = QGroupBox("Disponibilidad")
@@ -192,6 +197,16 @@ class PantallaProfesores(PantallaListaFormulario):
                 grado.id in profesor.grados,
             )
         self.grados.blockSignals(False)
+        self.eventos.clear()
+        for nivel in datos.niveles:
+            for evento in nivel.eventos:
+                self._agregar_casilla(
+                    self.eventos,
+                    f"{evento.nombre} · {nivel.nombre} ({NOMBRES_DIAS[evento.dia]} "
+                    f"{a_hhmm(evento.inicio)}–{a_hhmm(evento.fin)})",
+                    evento.id,
+                    evento.id in profesor.eventos,
+                )
         self._configurar_editor(profesor)
         self._actualizar_referencia()
 
@@ -221,6 +236,7 @@ class PantallaProfesores(PantallaListaFormulario):
                 asignaturas=_marcados(self.asignaturas),
                 grados=_marcados(self.grados),
                 disponibilidad=self.editor.disponibilidad(),
+                eventos=_marcados(self.eventos),
                 carga_max_semanal_min=self.carga_semanal.value(),
                 carga_max_diaria_min=self.carga_diaria.value(),
                 max_consecutivas=self.max_consecutivas.value(),

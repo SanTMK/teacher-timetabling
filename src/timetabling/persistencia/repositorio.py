@@ -19,8 +19,10 @@ from timetabling.dominio.modelos import (
     Configuracion,
     DatosEscuela,
     Disponibilidad,
+    DocenteAsignado,
     Espacio,
     EstadoSolucion,
+    Evento,
     Grado,
     Grupo,
     Nivel,
@@ -126,6 +128,7 @@ class Repositorio:
             profesores=self.listar_profesores(),
             espacios=self.listar_espacios(),
             asignaciones_fijas=self.listar_asignaciones_fijas(),
+            docentes_asignados=self.listar_docentes_asignados(),
         )
 
     def reemplazar_datos(self, datos: DatosEscuela) -> None:
@@ -136,6 +139,7 @@ class Repositorio:
         with self._cx:
             for tabla in (
                 "soluciones",
+                "docentes_asignados",
                 "asignaciones_fijas",
                 "plan_estudios",
                 "grupos",
@@ -163,6 +167,8 @@ class Repositorio:
             self.guardar_espacio(espacio)
         for fija in datos.asignaciones_fijas:
             self.guardar_asignacion_fija(fija)
+        for docente in datos.docentes_asignados:
+            self.asignar_docente(docente)
 
     def _guardar(self, tabla: str, campos: dict[str, object], id_: int | None) -> int:
         """Inserta (o actualiza si el id existe) y devuelve el id."""
@@ -230,6 +236,18 @@ class Repositorio:
                     fin=fila["fin"],
                 )
             )
+        eventos: dict[int, list[Evento]] = {}
+        for fila in self._filas("SELECT * FROM eventos ORDER BY id"):
+            eventos.setdefault(fila["nivel_id"], []).append(
+                Evento(
+                    id=fila["id"],
+                    nivel_id=fila["nivel_id"],
+                    nombre=fila["nombre"],
+                    dia=fila["dia"],
+                    inicio=fila["inicio"],
+                    fin=fila["fin"],
+                )
+            )
         return [
             Nivel(
                 id=f["id"],
@@ -239,7 +257,9 @@ class Repositorio:
                 fin_jornada=f["fin_jornada"],
                 dias=f["dias"].split(","),
                 recesos=recesos.get(f["id"], []),
+                eventos=eventos.get(f["id"], []),
                 sin_huecos_alumnos=bool(f["sin_huecos_alumnos"]),
+                duraciones_especiales=json.loads(f["duraciones_especiales"]),
             )
             for f in self._filas("SELECT * FROM niveles ORDER BY id")
         ]
@@ -256,6 +276,7 @@ class Repositorio:
                     "fin_jornada": nivel.fin_jornada,
                     "dias": ",".join(nivel.dias),
                     "sin_huecos_alumnos": int(nivel.sin_huecos_alumnos),
+                    "duraciones_especiales": json.dumps(nivel.duraciones_especiales),
                 },
                 nivel.id,
             )
@@ -273,7 +294,30 @@ class Repositorio:
                     receso.id,
                 )
                 recesos.append(receso.model_copy(update={"id": rid, "nivel_id": id_}))
-        return nivel.model_copy(update={"id": id_, "recesos": recesos})
+            # Los eventos se actualizan en su lugar (no se borran y recrean) para conservar
+            # qué profesores asisten a cada uno.
+            conservar = [e.id for e in nivel.eventos if e.id is not None]
+            marcas = ", ".join("?" for _ in conservar)
+            self._ejecutar(
+                "DELETE FROM eventos WHERE nivel_id = ?"
+                + (f" AND id NOT IN ({marcas})" if conservar else ""),
+                (id_, *conservar),
+            )
+            eventos = []
+            for evento in nivel.eventos:
+                eid = self._guardar(
+                    "eventos",
+                    {
+                        "nivel_id": id_,
+                        "nombre": evento.nombre,
+                        "dia": evento.dia,
+                        "inicio": evento.inicio,
+                        "fin": evento.fin,
+                    },
+                    evento.id,
+                )
+                eventos.append(evento.model_copy(update={"id": eid, "nivel_id": id_}))
+        return nivel.model_copy(update={"id": id_, "recesos": recesos, "eventos": eventos})
 
     def eliminar_nivel(self, nivel_id: int) -> None:
         self._eliminar("niveles", nivel_id)
@@ -394,6 +438,9 @@ class Repositorio:
         grados: dict[int, set[int]] = {}
         for f in self._filas("SELECT * FROM profesor_grado"):
             grados.setdefault(f["profesor_id"], set()).add(f["grado_id"])
+        eventos: dict[int, set[int]] = {}
+        for f in self._filas("SELECT * FROM profesor_evento"):
+            eventos.setdefault(f["profesor_id"], set()).add(f["evento_id"])
         disponibilidad: dict[int, list[Disponibilidad]] = {}
         for f in self._filas("SELECT * FROM disponibilidad ORDER BY id"):
             disponibilidad.setdefault(f["profesor_id"], []).append(
@@ -408,6 +455,7 @@ class Repositorio:
                 asignaturas=asignaturas.get(f["id"], set()),
                 grados=grados.get(f["id"], set()),
                 disponibilidad=disponibilidad.get(f["id"], []),
+                eventos=eventos.get(f["id"], set()),
                 carga_max_semanal_min=f["carga_max_semanal_min"],
                 carga_max_diaria_min=f["carga_max_diaria_min"],
                 max_consecutivas=f["max_consecutivas"],
@@ -437,6 +485,11 @@ class Repositorio:
             self._cx.executemany(
                 "INSERT INTO profesor_grado (profesor_id, grado_id) VALUES (?, ?)",
                 [(id_, g) for g in sorted(profesor.grados)],
+            )
+            self._ejecutar("DELETE FROM profesor_evento WHERE profesor_id = ?", (id_,))
+            self._cx.executemany(
+                "INSERT INTO profesor_evento (profesor_id, evento_id) VALUES (?, ?)",
+                [(id_, e) for e in sorted(profesor.eventos)],
             )
             self._ejecutar("DELETE FROM disponibilidad WHERE profesor_id = ?", (id_,))
             disponibilidad = []
@@ -509,6 +562,35 @@ class Repositorio:
     def eliminar_asignacion_fija(self, fija_id: int) -> None:
         self._eliminar("asignaciones_fijas", fija_id)
 
+    def listar_docentes_asignados(self) -> list[DocenteAsignado]:
+        return [
+            DocenteAsignado(
+                grupo_id=f["grupo_id"],
+                asignatura_id=f["asignatura_id"],
+                profesor_id=f["profesor_id"],
+            )
+            for f in self._filas(
+                "SELECT * FROM docentes_asignados ORDER BY grupo_id, asignatura_id"
+            )
+        ]
+
+    def asignar_docente(self, docente: DocenteAsignado) -> None:
+        """Fija el profesor de una asignatura en un grupo (reemplaza al anterior)."""
+        with self._cx:
+            self._ejecutar(
+                "INSERT OR REPLACE INTO docentes_asignados "
+                "(grupo_id, asignatura_id, profesor_id) VALUES (?, ?, ?)",
+                (docente.grupo_id, docente.asignatura_id, docente.profesor_id),
+            )
+
+    def quitar_docente(self, grupo_id: int, asignatura_id: int) -> None:
+        """Deja que el generador elija el profesor de esa asignatura en ese grupo."""
+        with self._cx:
+            self._ejecutar(
+                "DELETE FROM docentes_asignados WHERE grupo_id = ? AND asignatura_id = ?",
+                (grupo_id, asignatura_id),
+            )
+
     # --- Impacto de un borrado ------------------------------------------------------
 
     _DEPENDENCIAS: dict[str, list[tuple[str, str]]] = {
@@ -530,6 +612,7 @@ class Repositorio:
         ],
         "grupos": [
             ("asignaciones fijas", "SELECT COUNT(*) FROM asignaciones_fijas WHERE grupo_id = ?"),
+            ("profesores asignados", "SELECT COUNT(*) FROM docentes_asignados WHERE grupo_id = ?"),
             (
                 "soluciones",
                 "SELECT COUNT(DISTINCT solucion_id) FROM asignaciones WHERE grupo_id = ?",
@@ -538,6 +621,10 @@ class Repositorio:
         "asignaturas": [
             ("plan de estudios", "SELECT COUNT(*) FROM plan_estudios WHERE asignatura_id = ?"),
             ("profesores", "SELECT COUNT(*) FROM profesor_asignatura WHERE asignatura_id = ?"),
+            (
+                "profesores asignados",
+                "SELECT COUNT(*) FROM docentes_asignados WHERE asignatura_id = ?",
+            ),
             (
                 "asignaciones fijas",
                 "SELECT COUNT(*) FROM asignaciones_fijas WHERE asignatura_id = ?",
@@ -550,6 +637,10 @@ class Repositorio:
         "profesores": [
             ("disponibilidad", "SELECT COUNT(*) FROM disponibilidad WHERE profesor_id = ?"),
             ("grupos con titular", "SELECT COUNT(*) FROM grupos WHERE titular_id = ?"),
+            (
+                "clases asignadas",
+                "SELECT COUNT(*) FROM docentes_asignados WHERE profesor_id = ?",
+            ),
             (
                 "asignaciones fijas",
                 "SELECT COUNT(*) FROM asignaciones_fijas WHERE profesor_id = ?",

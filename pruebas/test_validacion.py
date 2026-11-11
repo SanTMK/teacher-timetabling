@@ -98,6 +98,16 @@ def test_6_fija_fuera_de_disponibilidad(minima: DatosEscuela) -> None:
     assert "Ana no está disponible el Lunes 08:00" in _mensajes(minima)
 
 
+def test_6_mas_fijas_que_horas(minima: DatosEscuela) -> None:
+    minima.asignaciones_fijas = [
+        AsignacionFija(grupo_id=1, asignatura_id=1, dia=d, indice_franja=i)
+        for d, i in (("L", 0), ("L", 1), ("M", 0))
+    ]
+    problemas = [p for p in validar(minima) if p.severidad == Severidad.ERROR]
+    assert [p.elemento for p in problemas] == ["Fija #3"]
+    assert "Matemáticas de 1°A tiene 3 clases fijas, pero solo 2 hora(s)" in problemas[0].mensaje
+
+
 def test_7_maximo_diario_insuficiente(minima: DatosEscuela) -> None:
     minima.asignatura(1).max_horas_dia = 1
     minima.plan[0].horas_semanales = 3
@@ -119,3 +129,10 @@ def test_8_incompletos(minima: DatosEscuela) -> None:
     assert "El grado 2° no tiene grupos" in mensajes
     assert "Nadie no tiene asignaturas" in mensajes
     assert "Nadie no tiene disponibilidad" in mensajes
+
+
+def test_duracion_especial_de_hora_inexistente(minima: DatosEscuela) -> None:
+    nivel = minima.niveles[0]
+    minima.niveles[0] = nivel.model_copy(update={"duraciones_especiales": {29: 40}})
+    (mensaje,) = _mensajes(minima, Severidad.ADVERTENCIA)
+    assert "La hora 30 tiene una duración especial" in mensaje

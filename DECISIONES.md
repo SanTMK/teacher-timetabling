@@ -161,8 +161,7 @@ Creado con Claude. Registro de las decisiones que la especificación no cubre o 
   saturaban la cuadrícula cuando el profesor atiende varios niveles.
 - **Proyectos recientes** se guardan con `QSettings` (local).
 - **Guardar como** copia el archivo y continúa trabajando sobre la copia.
-- Los problemas de validación de **asignaciones fijas** llevan, por ahora, a Grados y grupos;
-  la edición de fijas llega con la pantalla de Resultados (Fase 5).
+- Los problemas de validación de **asignaciones fijas** llevan a la pantalla *Clases fijas*.
 - `colores.py` (contraste de texto) vive en `dominio/` porque lo usarán la interfaz y la
   exportación, y la exportación no puede depender de la interfaz.
 
@@ -219,3 +218,22 @@ Creado con Claude. Registro de las decisiones que la especificación no cubre o 
   bloqueada por `sandbox-exec (deny network*)` resuelve igual y la interfaz arranca. El
   ejecutable no enlaza con ningún Python externo (`otool -L`). **No verificado:** una máquina
   distinta, Windows y macOS Intel (hay que construir en cada plataforma).
+
+## Clases fijas capturadas a mano
+
+- Pantalla **Clases fijas** con arrastrar y soltar (sustituye a la de lista + formulario).
+  Se elige un grupo; a la izquierda, una **paleta** con las asignaturas de su plan
+  («n de h h fijas») y debajo de cada una «cualquiera» (`profesor_id` nulo) y los profesores
+  habilitados; a la derecha, la **semana del grupo** con la misma disposición que
+  Resultados (`cuadricula_grupo` sin asignaciones, recesos en gris).
+- Lo arrastrado viaja como JSON con tipo MIME propio (`application/x-timetabling-fija`). De la
+  paleta a una celda crea la fija; de celda a celda la mueve; de celda a la paleta (o Supr,
+  o clic derecho) la quita, sin confirmación porque se rehace con otro arrastre.
+- Una celda que ya tiene una fija de ese grupo **no acepta** otra (se evita el choque más
+  común en vez de solo avisarlo). Los demás problemas (disponibilidad, choques del profesor
+  con otros grupos, más fijas que horas) se permiten y se listan en rojo bajo la cuadrícula
+  y en la ayuda emergente de la celda (⚠ en lugar de 📌).
+- Al seleccionar un profesor en la paleta se sombrean las horas libres: gris si no está
+  disponible, naranja si preferiría no, rojo si ya tiene una fija en otro grupo que se
+  traslapa (con el margen de traslado).
+- Nueva validación: más fijas de una asignatura en un grupo que sus horas semanales.
