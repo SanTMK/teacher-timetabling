@@ -136,7 +136,7 @@ def _b6_desequilibrio_carga(mh: ModeloHorario) -> list[Expr]:
     """Diferencia entre la carga máxima y mínima de los profesores de cada asignatura y
     nivel (solo se comparan docentes que podrían repartirse esos grupos), en unidades de la
     hora-clase más corta (redondeo hacia arriba)."""
-    unidad = min((n.duracion_min for n in mh.datos.niveles), default=50)
+    unidad = min((f.duracion for f in mh.franjas.values()), default=50)
     carga: dict[int, Expr] = {}
     profesores_de: dict[tuple[int, int], set[int]] = defaultdict(set)
     claves_de: dict[int, list[tuple[int, int, int, str]]] = defaultdict(list)

@@ -144,6 +144,7 @@ class CuadriculaFijas(QTableWidget):
         self.verticalHeader().setMinimumSectionSize(1)
         self.dias: list[str] = []
         self._indice_de_fila: dict[int, int] = {}
+        self._bloqueadas: set[tuple[int, int]] = set()
 
     # --- Estructura ----------------------------------------------------------------
 
@@ -176,6 +177,20 @@ class CuadriculaFijas(QTableWidget):
             if len(self.dias) > 1:
                 self.setSpan(i, 0, 1, len(self.dias))
         self.setVerticalHeaderLabels(etiquetas)
+        # Eventos del nivel (hora cívica): celdas celestes donde no se puede soltar.
+        self._bloqueadas: set[tuple[int, int]] = set()
+        for bloque in cuadricula.bloques:
+            if bloque.asignaciones:
+                continue
+            item = self.item(bloque.fila, bloque.columna)
+            if item is None:
+                continue
+            item.setText(bloque.titulo)
+            item.setBackground(QBrush(QColor(bloque.color)))
+            item.setForeground(QBrush(QColor(color_texto(bloque.color))))
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item.setToolTip(f"{bloque.titulo}: no hay clase a esta hora")
+            self._bloqueadas.add((bloque.fila, bloque.columna))
 
     @staticmethod
     def _celda_vacia() -> QTableWidgetItem:
@@ -187,6 +202,8 @@ class CuadriculaFijas(QTableWidget):
         """(día, índice de franja) de una celda, o ``None`` si es receso o está fuera."""
         indice = self._indice_de_fila.get(fila)
         if indice is None or not 0 <= columna < len(self.dias):
+            return None
+        if (fila, columna) in self._bloqueadas:
             return None
         return self.dias[columna], indice
 
@@ -216,6 +233,9 @@ class CuadriculaFijas(QTableWidget):
         """Colorea una celda vacía (``None`` la deja en blanco)."""
         item = self.celda(dia, indice)
         if item is None or item.data(ROL_INFO):
+            return
+        fila = next((f for f, i in self._indice_de_fila.items() if i == indice), None)
+        if dia in self.dias and (fila, self.dias.index(dia)) in self._bloqueadas:
             return
         item.setBackground(QBrush(QColor(color)) if color else QBrush())
         item.setToolTip(ayuda)

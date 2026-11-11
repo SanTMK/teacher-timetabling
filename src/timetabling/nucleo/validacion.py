@@ -14,6 +14,8 @@ from timetabling.dominio.modelos import (
     a_hhmm,
 )
 from timetabling.nucleo.franjas import (
+    evento_de_franja,
+    franjas_utiles_nivel,
     franjas_validas_profesor,
     generar_franjas_nivel,
     se_traslapan,
@@ -47,8 +49,9 @@ def hay_errores(problemas: list[Problema]) -> bool:
 
 def validar(datos: DatosEscuela) -> list[Problema]:
     """Ejecuta todas las revisiones. Con al menos un ``error`` no debe resolverse."""
+    # Franjas en que puede haber clase: sin las que ocupa un evento del nivel.
     franjas_nivel: dict[int, list[Franja]] = {
-        n.id: generar_franjas_nivel(n) for n in datos.niveles if n.id is not None
+        n.id: franjas_utiles_nivel(n) for n in datos.niveles if n.id is not None
     }
     problemas: list[Problema] = []
     for revision in (
@@ -58,8 +61,11 @@ def validar(datos: DatosEscuela) -> list[Problema]:
         _disponibilidad_util,
         _espacios,
         _asignaciones_fijas,
+        _docentes_asignados,
         _maximo_diario,
         _bloque_doble,
+        _duraciones_especiales,
+        _eventos,
         _incompletos,
     ):
         problemas.extend(revision(datos, franjas_nivel))
@@ -126,11 +132,16 @@ def _capacidad_docente(
     problemas = []
     for nivel in datos.niveles:
         grados = [g for g in datos.grados if g.nivel_id == nivel.id]
+        # Con horas de distinta duración se toma la más corta: así la revisión sigue siendo
+        # una condición necesaria (nunca reporta un error que el solver sí podría resolver).
+        minutos_hora = min(
+            (f.duracion for f in franjas_nivel.get(nivel.id, [])), default=nivel.duracion_min
+        )
         demanda: dict[int, int] = defaultdict(int)
         for grupo in datos.grupos:
             if any(g.id == grupo.grado_id for g in grados):
                 for a, horas in datos.plan_de_grado(grupo.grado_id).items():
-                    demanda[a] += horas * nivel.duracion_min
+                    demanda[a] += horas * minutos_hora
         for asignatura_id, minutos in demanda.items():
             oferta = 0
             habilitados = 0
@@ -139,7 +150,9 @@ def _capacidad_docente(
                     continue
                 if not any(g.id in profesor.grados for g in grados):
                     continue
-                validas = franjas_validas_profesor(profesor, franjas_nivel.get(nivel.id, []))
+                validas = franjas_validas_profesor(
+                    profesor, franjas_nivel.get(nivel.id, []), datos.eventos_de(profesor)
+                )
                 disponibles = sum(
                     f.duracion for f in franjas_nivel.get(nivel.id, []) if f.id in validas
                 )
@@ -247,6 +260,24 @@ def _asignaciones_fijas(
             ),
             None,
         )
+        nivel = datos.nivel(grado.nivel_id)
+        en_evento = next(
+            (
+                evento_de_franja(f, nivel)
+                for f in generar_franjas_nivel(nivel)
+                if f.dia == fija.dia and f.indice == fija.indice_franja
+            ),
+            None,
+        )
+        if franja is None and en_evento is not None:
+            problemas.append(
+                problema(
+                    i,
+                    f"La franja {fija.indice_franja + 1} del {NOMBRES_DIAS.get(fija.dia, fija.dia)}"
+                    f" de {nombre_grupo} está ocupada por «{en_evento.nombre}»",
+                )
+            )
+            continue
         if franja is None:
             problemas.append(
                 problema(
@@ -266,7 +297,9 @@ def _asignaciones_fijas(
                         f"{grado.nombre}",
                     )
                 )
-            if franja.id not in franjas_validas_profesor(profesor, [franja]):
+            if franja.id not in franjas_validas_profesor(
+                profesor, [franja], datos.eventos_de(profesor)
+            ):
                 problemas.append(
                     problema(
                         i,
@@ -301,6 +334,104 @@ def _asignaciones_fijas(
                 problemas.append(
                     problema(j, f"Choca con la fija #{i + 1}: el profesor estaría en dos lugares")
                 )
+    return problemas
+
+
+def _docentes_asignados(
+    datos: DatosEscuela, franjas_nivel: dict[int, list[Franja]]
+) -> list[Problema]:
+    """6b. Profesores asignados por grupo: habilitados, coherentes con las clases fijas y
+    con carga y disponibilidad suficientes para todo lo que se les asignó."""
+    problemas = []
+    sesiones: dict[tuple[int, int], int] = defaultdict(int)  # (profesor, nivel) → horas
+    minutos: dict[int, int] = defaultdict(int)
+    for docente in datos.docentes_asignados:
+        grupo = datos.grupo(docente.grupo_id)
+        grado = datos.grado(grupo.grado_id)
+        asignatura = datos.asignatura(docente.asignatura_id)
+        profesor = datos.profesor(docente.profesor_id)
+        etiqueta = f"{datos.nombre_grupo(grupo)} – {asignatura.nombre}"
+        horas = datos.plan_de_grado(grado.id).get(docente.asignatura_id, 0)
+        if not horas:
+            problemas.append(
+                Problema(
+                    "docentes",
+                    grupo.id,
+                    etiqueta,
+                    Severidad.ADVERTENCIA,
+                    f"{profesor.nombre} está asignado a {asignatura.nombre} en "
+                    f"{datos.nombre_grupo(grupo)}, pero no está en el plan de {grado.nombre}",
+                )
+            )
+            continue
+        if docente.asignatura_id not in profesor.asignaturas or grado.id not in profesor.grados:
+            problemas.append(
+                Problema(
+                    "docentes",
+                    grupo.id,
+                    etiqueta,
+                    Severidad.ERROR,
+                    f"{profesor.nombre} está asignado a {asignatura.nombre} en "
+                    f"{datos.nombre_grupo(grupo)}, pero no está habilitado para "
+                    f"{asignatura.nombre} en {grado.nombre}",
+                )
+            )
+        for fija in datos.asignaciones_fijas:
+            if (
+                fija.grupo_id == grupo.id
+                and fija.asignatura_id == docente.asignatura_id
+                and fija.profesor_id is not None
+                and fija.profesor_id != profesor.id
+            ):
+                problemas.append(
+                    Problema(
+                        "docentes",
+                        grupo.id,
+                        etiqueta,
+                        Severidad.ERROR,
+                        f"Hay una clase fija de {asignatura.nombre} en "
+                        f"{datos.nombre_grupo(grupo)} con "
+                        f"{datos.profesor(fija.profesor_id).nombre}, pero la asignatura está "
+                        f"asignada a {profesor.nombre}",
+                    )
+                )
+                break
+        franjas = franjas_nivel.get(grado.nivel_id, [])
+        sesiones[(profesor.id, grado.nivel_id)] += horas  # type: ignore[index]
+        minutos[profesor.id] += horas * min(  # type: ignore[index]
+            (f.duracion for f in franjas), default=datos.nivel(grado.nivel_id).duracion_min
+        )
+    for (profesor_id, nivel_id), horas in sesiones.items():
+        profesor = datos.profesor(profesor_id)
+        validas = franjas_validas_profesor(
+            profesor, franjas_nivel.get(nivel_id, []), datos.eventos_de(profesor)
+        )
+        if horas > len(validas):
+            nivel = datos.nivel(nivel_id)
+            problemas.append(
+                Problema(
+                    "profesores",
+                    profesor_id,
+                    profesor.nombre,
+                    Severidad.ERROR,
+                    f"{profesor.nombre} tiene asignadas {horas} horas-clase en "
+                    f"{nivel.nombre.lower()}, pero solo está disponible en {len(validas)} "
+                    "franjas de ese nivel",
+                )
+            )
+    for profesor_id, total in minutos.items():
+        profesor = datos.profesor(profesor_id)
+        if total > profesor.carga_max_semanal_min:
+            problemas.append(
+                Problema(
+                    "profesores",
+                    profesor_id,
+                    profesor.nombre,
+                    Severidad.ERROR,
+                    f"{profesor.nombre} tiene asignados al menos {_miles(total)} min/semana, "
+                    f"más que su carga máxima ({_miles(profesor.carga_max_semanal_min)})",
+                )
+            )
     return problemas
 
 
@@ -341,6 +472,52 @@ def _bloque_doble(datos: DatosEscuela, franjas_nivel: dict[int, list[Franja]]) -
         for a in datos.asignaturas
         if a.bloque_doble == BloqueDoble.OBLIGATORIO and a.max_horas_dia < 2
     ]
+
+
+def _duraciones_especiales(
+    datos: DatosEscuela, franjas_nivel: dict[int, list[Franja]]
+) -> list[Problema]:
+    """Cada hora con duración especial existe en la jornada del nivel."""
+    problemas = []
+    for nivel in datos.niveles:
+        if not nivel.duraciones_especiales:
+            continue
+        franjas = franjas_nivel.get(nivel.id, [])
+        por_dia = max((f.indice + 1 for f in franjas), default=0)
+        for indice in nivel.duraciones_especiales:
+            if indice >= por_dia:
+                problemas.append(
+                    Problema(
+                        "niveles",
+                        nivel.id,
+                        nivel.nombre,
+                        Severidad.ADVERTENCIA,
+                        f"La hora {indice + 1} tiene una duración especial, pero la jornada "
+                        f"de {nivel.nombre.lower()} solo tiene {por_dia} horas por día",
+                    )
+                )
+    return problemas
+
+
+def _eventos(datos: DatosEscuela, franjas_nivel: dict[int, list[Franja]]) -> list[Problema]:
+    """Cada evento cae en un día lectivo y ocupa al menos una franja de su nivel."""
+    problemas = []
+    for nivel in datos.niveles:
+        franjas = generar_franjas_nivel(nivel) if nivel.id is not None else []
+        for evento in nivel.eventos:
+            if not any(evento.toca(f.dia, f.inicio, f.fin) for f in franjas):
+                problemas.append(
+                    Problema(
+                        "niveles",
+                        nivel.id,
+                        nivel.nombre,
+                        Severidad.ADVERTENCIA,
+                        f"«{evento.nombre}» ({NOMBRES_DIAS[evento.dia]} "
+                        f"{a_hhmm(evento.inicio)}–{a_hhmm(evento.fin)}) no coincide con ninguna "
+                        f"franja de {nivel.nombre.lower()}",
+                    )
+                )
+    return problemas
 
 
 def _incompletos(datos: DatosEscuela, franjas_nivel: dict[int, list[Franja]]) -> list[Problema]:

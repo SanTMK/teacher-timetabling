@@ -191,6 +191,60 @@ def comando_exportar(
     _exportar(proyecto, solucion, salida)
 
 
+@app.command("importar-excel")
+def comando_importar_excel(
+    proyecto: Proyecto,
+    excel: Annotated[Path, typer.Argument(help="Cuadro de horarios .xlsx (una hoja por grado)")],
+) -> None:
+    """Crea asignaturas, grupos y plan de estudios a partir de un cuadro de horarios."""
+    from timetabling.importacion.horarios_excel import importar_archivo
+
+    if not excel.exists():
+        typer.echo(f"No existe el archivo {excel}", err=True)
+        raise typer.Exit(1)
+    try:
+        informe = importar_archivo(proyecto, excel)
+    except FileNotFoundError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(1) from None
+    for anterior, nuevo in informe.asignaturas_renombradas:
+        typer.echo(f"Asignatura renombrada: {anterior} → {nuevo}")
+    typer.echo(
+        f"{len(informe.asignaturas_nuevas)} asignaturas nuevas, {len(informe.grupos_nuevos)} "
+        f"grupos nuevos, {informe.filas_plan} filas del plan de estudios "
+        f"({informe.tutorias_omitidas} tutorías omitidas)."
+    )
+    for evento in informe.eventos_nuevos:
+        typer.echo(f"Evento nuevo: {evento}")
+    for aviso in informe.avisos:
+        typer.secho(f"Aviso: {aviso}", fg=typer.colors.YELLOW)
+
+
+@app.command("importar-maestros")
+def comando_importar_maestros(
+    proyecto: Proyecto,
+    excel: Annotated[Path, typer.Argument(help="Cuadro de horarios de maestros .xlsx")],
+) -> None:
+    """Crea profesores y fija qué asignatura da cada uno en cada grupo."""
+    from timetabling.importacion.maestros_excel import importar_archivo
+
+    if not excel.exists():
+        typer.echo(f"No existe el archivo {excel}", err=True)
+        raise typer.Exit(1)
+    try:
+        informe = importar_archivo(proyecto, excel)
+    except FileNotFoundError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(1) from None
+    typer.echo(
+        f"{len(informe.profesores_nuevos)} profesores nuevos, "
+        f"{len(informe.profesores_actualizados)} actualizados, {informe.asignaciones} "
+        "asignaturas con profesor fijo por grupo."
+    )
+    for aviso in informe.avisos:
+        typer.secho(f"Aviso: {aviso}", fg=typer.colors.YELLOW)
+
+
 def main() -> None:
     app()
 

@@ -45,7 +45,7 @@ archivo de su escuela. A la izquierda verá las secciones; recórralas en orden:
 | Sección | Qué hacer |
 |---|---|
 | **Configuración** | Nombre de la escuela y cuánto tiempo puede tardar el cálculo. Si los profesores necesitan unos minutos para cambiar de edificio entre niveles, indíquelos en *Margen de traslado*. |
-| **Niveles** | Para preescolar, primaria y secundaria: duración de la clase, hora de entrada y salida, días y recesos. Abajo verá cómo quedan las horas de clase. |
+| **Niveles** | Para preescolar, primaria y secundaria: duración de la clase, hora de entrada y salida, días y recesos. Si alguna hora dura distinto (p. ej. la última hora de 40 min), agréguela en *Horas con duración distinta*. Abajo verá cómo quedan las horas de clase. |
 | **Grados y grupos** | Seleccione un nivel → *Agregar grado* (p. ej. «1°»); seleccione el grado → *Agregar grupo* (p. ej. «A»). |
 | **Asignaturas** | Nombre, color, máximo de horas por día y, si la necesita, el tipo de salón (laboratorio, cómputo, patio…). |
 | **Plan de estudios** | Escriba cuántas horas por semana lleva cada asignatura en cada grado. La columna *Total* se pone en rojo si no caben. |

@@ -10,6 +10,7 @@ from timetabling.dominio.modelos import (
     AsignacionFija,
     Configuracion,
     EstadoSolucion,
+    Nivel,
     Pesos,
     PlanEstudios,
     Solucion,
@@ -166,17 +167,41 @@ def test_migraciones(tmp_path: Path) -> None:
     assert migraciones.version_de(conexion) == migraciones.VERSION_ACTUAL
 
     aplicadas: list[int] = []
+    siguiente = migraciones.VERSION_ACTUAL + 1
 
-    def a_v2(cx: sqlite3.Connection) -> None:
+    def migrar(cx: sqlite3.Connection) -> None:
         cx.execute("ALTER TABLE niveles ADD COLUMN color TEXT")
-        aplicadas.append(2)
+        aplicadas.append(siguiente)
 
-    anterior = migraciones.aplicar_migraciones(conexion, version_actual=2, migraciones={2: a_v2})
-    assert anterior == 1 and aplicadas == [2]
-    assert migraciones.version_de(conexion) == 2
+    anterior = migraciones.aplicar_migraciones(
+        conexion, version_actual=siguiente, migraciones={siguiente: migrar}
+    )
+    assert anterior == migraciones.VERSION_ACTUAL and aplicadas == [siguiente]
+    assert migraciones.version_de(conexion) == siguiente
     columnas = [f[1] for f in conexion.execute("PRAGMA table_info(niveles)")]
     assert "color" in columnas
     conexion.close()
 
     with pytest.raises(migraciones.ErrorVersionEsquema):
-        Repositorio.abrir(ruta)  # el programa solo conoce la versión 1
+        Repositorio.abrir(ruta)  # el programa no conoce la versión siguiente
+
+
+def test_migracion_v1_a_v2_duraciones_especiales(tmp_path: Path) -> None:
+    """Un proyecto de la versión 1 se abre, gana la columna y conserva sus niveles."""
+    ruta = tmp_path / "v1.horario"
+    with Repositorio.crear(ruta) as repo:
+        repo.guardar_nivel(
+            Nivel(nombre="Primaria", duracion_min=45, inicio_jornada=480, fin_jornada=780)
+        )
+    conexion = sqlite3.connect(ruta)
+    conexion.execute("ALTER TABLE niveles DROP COLUMN duraciones_especiales")
+    conexion.execute("UPDATE esquema_version SET version = 1")
+    conexion.commit()
+    conexion.close()
+
+    with Repositorio.abrir(ruta) as repo:
+        (nivel,) = repo.listar_niveles()
+        assert nivel.duraciones_especiales == {}
+        repo.guardar_nivel(nivel.model_copy(update={"duraciones_especiales": {6: 40}}))
+    with Repositorio.abrir(ruta) as repo:
+        assert repo.listar_niveles()[0].duraciones_especiales == {6: 40}

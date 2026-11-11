@@ -27,6 +27,7 @@ _ENTIDADES = {
     "profesores": "Profesores",
     "espacios": "Espacios",
     "asignaciones_fijas": "Clases fijas",
+    "docentes": "Profesores por grupo",
 }
 
 

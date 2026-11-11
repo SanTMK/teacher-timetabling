@@ -122,3 +122,50 @@ def test_disponibilidad_franja_completa_y_tipo() -> None:
     assert tipo_disponibilidad(franja, completo) == TipoDisponibilidad.DISPONIBLE
     otro_dia = [Disponibilidad(dia="M", inicio=a_minutos("07:00"), fin=a_minutos("14:00"))]
     assert tipo_disponibilidad(franja, otro_dia) is None
+
+
+def test_ultima_hora_mas_corta() -> None:
+    """Primaria: horas de 45 min, la última de 40 min, con recreo a media mañana."""
+    nivel = _nivel(1, "07:30", "12:40", 45, [("09:45", "10:15")]).model_copy(
+        update={"duraciones_especiales": {5: 40}}
+    )
+    franjas = generar_franjas_nivel(nivel)
+    assert _horas(franjas) == [
+        "07:30-08:15",
+        "08:15-09:00",
+        "09:00-09:45",
+        "10:15-11:00",
+        "11:00-11:45",
+        "11:45-12:25",
+    ]
+    assert [f.duracion for f in franjas if f.dia == "M"] == [45, 45, 45, 45, 45, 40]
+
+
+def test_hora_especial_permite_que_quepa_una_franja_mas() -> None:
+    """Sin la excepción, a la jornada le faltan 5 minutos para la última hora."""
+    base = _nivel(1, "08:00", "10:10", 45, [])
+    assert len(_horas(generar_franjas_nivel(base))) == 2
+    corta = base.model_copy(update={"duraciones_especiales": {2: 40}})
+    assert _horas(generar_franjas_nivel(corta))[-1] == "09:30-10:10"
+
+
+def test_duraciones_especiales_invalidas() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Nivel(
+            nombre="X",
+            duracion_min=45,
+            inicio_jornada=0,
+            fin_jornada=600,
+            duraciones_especiales={6: 2},
+        )
+    with pytest.raises(ValidationError):
+        Nivel(
+            nombre="X",
+            duracion_min=45,
+            inicio_jornada=0,
+            fin_jornada=600,
+            duraciones_especiales={-1: 40},
+        )

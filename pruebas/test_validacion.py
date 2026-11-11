@@ -129,3 +129,10 @@ def test_8_incompletos(minima: DatosEscuela) -> None:
     assert "El grado 2° no tiene grupos" in mensajes
     assert "Nadie no tiene asignaturas" in mensajes
     assert "Nadie no tiene disponibilidad" in mensajes
+
+
+def test_duracion_especial_de_hora_inexistente(minima: DatosEscuela) -> None:
+    nivel = minima.niveles[0]
+    minima.niveles[0] = nivel.model_copy(update={"duraciones_especiales": {29: 40}})
+    (mensaje,) = _mensajes(minima, Severidad.ADVERTENCIA)
+    assert "La hora 30 tiene una duración especial" in mensaje

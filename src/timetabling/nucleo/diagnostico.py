@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from ortools.sat.python import cp_model
 
 from timetabling.dominio.modelos import NOMBRES_DIAS, DatosEscuela
-from timetabling.nucleo.franjas import franjas_validas_profesor, generar_franjas_nivel
+from timetabling.nucleo.franjas import franjas_utiles_nivel, franjas_validas_profesor
 from timetabling.nucleo.modelo import Clave, ModeloHorario, construir_modelo
 
 
@@ -91,9 +91,10 @@ def traducir(datos: DatosEscuela, clave: Clave) -> Conflicto:
         grupo = datos.grupo(g)
         asignatura = datos.asignatura(a)
         horas = datos.plan_de_grado(grupo.grado_id).get(a, 0)
-        franjas_nivel = generar_franjas_nivel(datos.nivel_de_grupo(grupo))
+        franjas_nivel = franjas_utiles_nivel(datos.nivel_de_grupo(grupo))
         habilitados = [
-            f"{p.nombre}, disponible en {len(franjas_validas_profesor(p, franjas_nivel))} franjas"
+            f"{p.nombre}, disponible en "
+            f"{len(franjas_validas_profesor(p, franjas_nivel, datos.eventos_de(p)))} franjas"
             for p in datos.profesores
             if a in p.asignaturas and grupo.grado_id in p.grados
         ]
@@ -177,5 +178,15 @@ def traducir(datos: DatosEscuela, clave: Clave) -> Conflicto:
             f"Asignación fija: {datos.asignatura(fija.asignatura_id).nombre}{con} en "
             f"{datos.nombre_grupo(datos.grupo(fija.grupo_id))} el "
             f"{NOMBRES_DIAS.get(fija.dia, fija.dia)}, franja {fija.indice_franja + 1}",
+        )
+    if tipo == "docente":
+        docente = datos.docentes_asignados[int(clave[1])]  # type: ignore[call-overload]
+        return Conflicto(
+            clave,
+            "docentes",
+            docente.grupo_id,
+            f"{datos.asignatura(docente.asignatura_id).nombre} en "
+            f"{datos.nombre_grupo(datos.grupo(docente.grupo_id))} está asignada a "
+            f"{datos.profesor(docente.profesor_id).nombre}",
         )
     return Conflicto(clave, "validacion", None, f"Restricción {clave}")

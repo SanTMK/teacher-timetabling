@@ -1,4 +1,4 @@
--- Creado con Claude. Esquema SQLite de un proyecto de horario (versión 1).
+-- Creado con Claude. Esquema SQLite de un proyecto de horario (versión 4).
 
 CREATE TABLE esquema_version (
     version INTEGER NOT NULL
@@ -20,13 +20,24 @@ CREATE TABLE niveles (
     inicio_jornada INTEGER NOT NULL,
     fin_jornada INTEGER NOT NULL,
     dias TEXT NOT NULL,  -- p. ej. "L,M,X,J,V"
-    sin_huecos_alumnos INTEGER NOT NULL DEFAULT 0
+    sin_huecos_alumnos INTEGER NOT NULL DEFAULT 0,
+    duraciones_especiales TEXT NOT NULL DEFAULT '{}'  -- JSON: índice de franja → minutos
 );
 
 CREATE TABLE recesos (
     id INTEGER PRIMARY KEY,
     nivel_id INTEGER NOT NULL REFERENCES niveles(id) ON DELETE CASCADE,
     nombre TEXT NOT NULL,
+    inicio INTEGER NOT NULL,
+    fin INTEGER NOT NULL
+);
+
+-- Eventos de todo el nivel en un día y hora (p. ej. la hora cívica).
+CREATE TABLE eventos (
+    id INTEGER PRIMARY KEY,
+    nivel_id INTEGER NOT NULL REFERENCES niveles(id) ON DELETE CASCADE,
+    nombre TEXT NOT NULL,
+    dia TEXT NOT NULL,
     inicio INTEGER NOT NULL,
     fin INTEGER NOT NULL
 );
@@ -84,6 +95,12 @@ CREATE TABLE profesor_grado (
     PRIMARY KEY (profesor_id, grado_id)
 );
 
+CREATE TABLE profesor_evento (
+    profesor_id INTEGER NOT NULL REFERENCES profesores(id) ON DELETE CASCADE,
+    evento_id INTEGER NOT NULL REFERENCES eventos(id) ON DELETE CASCADE,
+    PRIMARY KEY (profesor_id, evento_id)
+);
+
 CREATE TABLE disponibilidad (
     id INTEGER PRIMARY KEY,
     profesor_id INTEGER NOT NULL REFERENCES profesores(id) ON DELETE CASCADE,
@@ -107,6 +124,14 @@ CREATE TABLE asignaciones_fijas (
     profesor_id INTEGER REFERENCES profesores(id) ON DELETE SET NULL,
     dia TEXT NOT NULL,
     indice_franja INTEGER NOT NULL
+);
+
+-- Profesor fijo para una asignatura de un grupo (el generador solo decide las franjas).
+CREATE TABLE docentes_asignados (
+    grupo_id INTEGER NOT NULL REFERENCES grupos(id) ON DELETE CASCADE,
+    asignatura_id INTEGER NOT NULL REFERENCES asignaturas(id) ON DELETE CASCADE,
+    profesor_id INTEGER NOT NULL REFERENCES profesores(id) ON DELETE CASCADE,
+    PRIMARY KEY (grupo_id, asignatura_id)
 );
 
 CREATE TABLE soluciones (

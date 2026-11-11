@@ -11,12 +11,48 @@ import sqlite3
 from collections.abc import Callable
 from importlib import resources
 
-VERSION_ACTUAL = 1
+VERSION_ACTUAL = 4
 
 Migracion = Callable[[sqlite3.Connection], None]
 
+
+def _a_v2(conexion: sqlite3.Connection) -> None:
+    """Duraciones especiales por hora (p. ej. una última hora más corta)."""
+    conexion.execute(
+        "ALTER TABLE niveles ADD COLUMN duraciones_especiales TEXT NOT NULL DEFAULT '{}'"
+    )
+
+
+def _a_v3(conexion: sqlite3.Connection) -> None:
+    """Profesor fijo por grupo y asignatura."""
+    conexion.execute(
+        "CREATE TABLE IF NOT EXISTS docentes_asignados ("
+        " grupo_id INTEGER NOT NULL REFERENCES grupos(id) ON DELETE CASCADE,"
+        " asignatura_id INTEGER NOT NULL REFERENCES asignaturas(id) ON DELETE CASCADE,"
+        " profesor_id INTEGER NOT NULL REFERENCES profesores(id) ON DELETE CASCADE,"
+        " PRIMARY KEY (grupo_id, asignatura_id))"
+    )
+
+
+def _a_v4(conexion: sqlite3.Connection) -> None:
+    """Eventos por nivel (hora cívica) y profesores que asisten a ellos."""
+    conexion.execute(
+        "CREATE TABLE IF NOT EXISTS eventos ("
+        " id INTEGER PRIMARY KEY,"
+        " nivel_id INTEGER NOT NULL REFERENCES niveles(id) ON DELETE CASCADE,"
+        " nombre TEXT NOT NULL, dia TEXT NOT NULL,"
+        " inicio INTEGER NOT NULL, fin INTEGER NOT NULL)"
+    )
+    conexion.execute(
+        "CREATE TABLE IF NOT EXISTS profesor_evento ("
+        " profesor_id INTEGER NOT NULL REFERENCES profesores(id) ON DELETE CASCADE,"
+        " evento_id INTEGER NOT NULL REFERENCES eventos(id) ON DELETE CASCADE,"
+        " PRIMARY KEY (profesor_id, evento_id))"
+    )
+
+
 # versión destino → función que migra desde la versión anterior
-MIGRACIONES: dict[int, Migracion] = {}
+MIGRACIONES: dict[int, Migracion] = {2: _a_v2, 3: _a_v3, 4: _a_v4}
 
 
 class ErrorVersionEsquema(Exception):

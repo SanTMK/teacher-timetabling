@@ -187,7 +187,7 @@ class PantallaFijas(Pantalla):
                 self.cuadricula.sombrear(f.dia, f.indice, None)
             return
         profesor = datos.profesor(profesor_id)
-        validas = franjas_validas_profesor(profesor, del_nivel)
+        validas = franjas_validas_profesor(profesor, del_nivel, self._datos.eventos_de(profesor))
         margen = datos.configuracion.margen_traslado_min
         otras = [
             (fija, franja)
