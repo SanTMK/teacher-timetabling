@@ -140,6 +140,17 @@ Genera el ícono, ejecuta PyInstaller con `empaquetado/timetabling.spec` y deja 
 aplicación (`Timetabling.app` o la carpeta `Timetabling/` con `Timetabling.exe`) y un `.zip`
 para distribuir.
 
+### Publicar una versión
+
+Al subir una etiqueta que empiece con `v`, GitHub Actions
+([`.github/workflows/release.yml`](.github/workflows/release.yml)) construye en macOS y en
+Windows y crea una *release* con los dos `.zip`:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
 ### Estado
 
 | Fase | Contenido | Estado |

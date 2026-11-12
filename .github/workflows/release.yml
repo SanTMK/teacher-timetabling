@@ -1,0 +1,43 @@
+# Creado con Claude. Al subir una etiqueta «v*» (p. ej. v1.0.0) construye el ejecutable en
+# macOS y en Windows (PyInstaller no compila de un sistema a otro) y publica una release de
+# GitHub con los dos .zip.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - run: uv run python empaquetado/construir.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zip-${{ matrix.os }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: zips
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ github.ref_name }}" zips/*.zip
+          --repo "${{ github.repository }}"
+          --title "${{ github.ref_name }}" --generate-notes
