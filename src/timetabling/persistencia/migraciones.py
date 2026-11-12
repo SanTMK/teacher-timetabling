@@ -11,7 +11,7 @@ import sqlite3
 from collections.abc import Callable
 from importlib import resources
 
-VERSION_ACTUAL = 4
+VERSION_ACTUAL = 5
 
 Migracion = Callable[[sqlite3.Connection], None]
 
@@ -51,8 +51,15 @@ def _a_v4(conexion: sqlite3.Connection) -> None:
     )
 
 
+def _a_v5(conexion: sqlite3.Connection) -> None:
+    """Marca de la solución vigente (el horario que está en uso)."""
+    columnas = {fila[1] for fila in conexion.execute("PRAGMA table_info(soluciones)")}
+    if "vigente" not in columnas:
+        conexion.execute("ALTER TABLE soluciones ADD COLUMN vigente INTEGER NOT NULL DEFAULT 0")
+
+
 # versión destino → función que migra desde la versión anterior
-MIGRACIONES: dict[int, Migracion] = {2: _a_v2, 3: _a_v3, 4: _a_v4}
+MIGRACIONES: dict[int, Migracion] = {2: _a_v2, 3: _a_v3, 4: _a_v4, 5: _a_v5}
 
 
 class ErrorVersionEsquema(Exception):

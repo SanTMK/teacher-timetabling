@@ -8,6 +8,7 @@ from pathlib import Path
 import xlsxwriter
 from xlsxwriter.worksheet import Worksheet
 
+from timetabling.dominio.comparacion import ENCABEZADOS_CAMBIOS, Cambio, filas_cambios
 from timetabling.dominio.cuadricula import (
     Cuadricula,
     cuadricula_espacio,
@@ -37,6 +38,7 @@ class OpcionesExportacion:
     profesores: bool = True
     espacios: bool = True
     resumen: bool = True
+    cambios: bool = True  # solo si se pasan cambios respecto al horario vigente
 
 
 class _Exportador:
@@ -224,6 +226,28 @@ class _Exportador:
             hoja, self.escuela, "Carga docente", self.fecha, len(cargas) + 1, len(encabezados)
         )
 
+    def cambios(self, cambios: list[Cambio]) -> None:
+        hoja = self.hoja("Cambios")
+        e = self.estilos
+        for c, ancho in enumerate([14, 24, 26, 30, 30]):
+            hoja.set_column(c, c, ancho)
+        for c, texto in enumerate(ENCABEZADOS_CAMBIOS):
+            hoja.write(0, c, texto, e.encabezado)
+        filas = filas_cambios(self.datos, self.franjas, cambios)
+        for r, valores in enumerate(filas, start=1):
+            for c, valor in enumerate(valores):
+                hoja.write(r, c, valor, e.celda)
+        hoja.autofilter(0, 0, len(filas), len(ENCABEZADOS_CAMBIOS) - 1)
+        hoja.freeze_panes(1, 0)
+        configurar_impresion(
+            hoja,
+            self.escuela,
+            "Cambios respecto al horario vigente",
+            self.fecha,
+            len(filas) + 1,
+            len(ENCABEZADOS_CAMBIOS),
+        )
+
     def leyenda(self) -> None:
         hoja = self.hoja("Leyenda")
         e = self.estilos
@@ -245,13 +269,18 @@ def exportar_excel(
     franjas: list[Franja],
     ruta: str | Path,
     opciones: OpcionesExportacion | None = None,
+    cambios: list[Cambio] | None = None,
 ) -> Path:
-    """Escribe el libro y devuelve su ruta. ``franjas`` son las franjas de todos los niveles."""
+    """Escribe el libro y devuelve su ruta. ``franjas`` son las franjas de todos los niveles.
+
+    ``cambios`` (respecto al horario vigente) agrega una hoja «Cambios»."""
     opciones = opciones or OpcionesExportacion()
     ruta = Path(ruta)
     exportador = _Exportador(datos, solucion, franjas, ruta)
     if opciones.resumen:
         exportador.resumen()
+    if opciones.cambios and cambios is not None:
+        exportador.cambios(cambios)
     if opciones.grupos:
         exportador.grupos()
     if opciones.profesores:

@@ -1,4 +1,7 @@
-"""Creado con Claude. Pantalla Generar: lanza el solver en segundo plano y muestra el progreso."""
+"""Creado con Claude. Pantalla Generar: lanza el solver en segundo plano y muestra el progreso.
+
+«Reajustar horario vigente» parte del horario en uso y mueve lo menos posible (B9), para
+cuando cambian los datos (p. ej. el personal) con un horario ya publicado."""
 
 from __future__ import annotations
 
@@ -16,8 +19,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from timetabling.dominio.comparacion import comparar, profesores_afectados
 from timetabling.dominio.estadisticas import penalizacion_total
-from timetabling.dominio.modelos import EstadoSolucion, Pesos, Solucion
+from timetabling.dominio.modelos import Asignacion, EstadoSolucion, Pesos, Solucion
 from timetabling.gui.pantallas.base import Pantalla
 from timetabling.gui.trabajador import ResultadoTrabajo, TrabajadorResolucion
 from timetabling.nucleo.resolver import Progreso
@@ -45,13 +49,22 @@ class PantallaGenerar(Pantalla):
         self._inicio = 0.0
         self._limite = 1.0
         self._pesos = Pesos()
+        self._base_id: int | None = None
+        self._base: list[Asignacion] = []
         self._reloj = QTimer(self)
         self._reloj.setInterval(200)
         self._reloj.timeout.connect(self._tic)
 
         self.boton_generar = QPushButton("Generar horario")
         self.boton_generar.setDefault(True)
+        self.boton_generar.setToolTip("Calcula un horario nuevo desde cero")
         self.boton_generar.clicked.connect(lambda: self.generar())
+        self.boton_reajustar = QPushButton("Reajustar horario vigente")
+        self.boton_reajustar.setToolTip(
+            "Parte del horario vigente y cambia lo menos posible para que cumpla los datos "
+            "actuales (por ejemplo, tras un cambio de personal)"
+        )
+        self.boton_reajustar.clicked.connect(lambda: self.generar(reajustar=True))
         self.boton_cancelar = QPushButton("Cancelar")
         self.boton_cancelar.setToolTip("Detiene la búsqueda y conserva la mejor solución hallada")
         self.boton_cancelar.setEnabled(False)
@@ -84,6 +97,7 @@ class PantallaGenerar(Pantalla):
 
         botones = QHBoxLayout()
         botones.addWidget(self.boton_generar)
+        botones.addWidget(self.boton_reajustar)
         botones.addWidget(self.boton_cancelar)
         botones.addStretch()
         datos = QFormLayout()
@@ -112,11 +126,26 @@ class PantallaGenerar(Pantalla):
     def refrescar(self) -> None:
         if not self.en_curso:
             assert self.repo is not None
+            vigente = self.repo.solucion_vigente_id()
+            self.boton_reajustar.setEnabled(vigente is not None)
+            self.boton_reajustar.setText(
+                f"Reajustar horario vigente (#{vigente})"
+                if vigente is not None
+                else "Reajustar horario vigente"
+            )
+            if vigente is None:
+                self.boton_reajustar.setToolTip(
+                    "Marque una solución como vigente en Resultados para poder reajustarla"
+                )
             config = self.repo.obtener_configuracion()
             self.fase.setText(
                 f"Listo para generar (tiempo límite {config.tiempo_limite_s} s, "
                 f"{config.hilos} hilos)."
             )
+
+    def refrescar_botones(self) -> None:
+        if self.repo is not None:
+            self.boton_reajustar.setEnabled(self.repo.solucion_vigente_id() is not None)
 
     def _mostrar_mensaje(self, texto: str, color: str = "") -> None:
         self.mensaje.setText(texto)
@@ -124,11 +153,23 @@ class PantallaGenerar(Pantalla):
 
     # --- Ciclo de resolución --------------------------------------------------------
 
-    def generar(self, tiempo_limite_s: float | None = None) -> bool:
-        """Valida y lanza el solver en segundo plano. Devuelve falso si no se lanzó."""
+    def generar(self, tiempo_limite_s: float | None = None, reajustar: bool = False) -> bool:
+        """Valida y lanza el solver en segundo plano. Devuelve falso si no se lanzó.
+
+        Con ``reajustar`` parte del horario vigente y penaliza cada clase que cambie.
+        """
         if self.en_curso or self.repo is None:
             return False
         datos = self.repo.cargar_datos()
+        self._base_id = self.repo.solucion_vigente_id() if reajustar else None
+        if reajustar and self._base_id is None:
+            self._mostrar_mensaje(
+                "No hay un horario vigente. En Resultados, elija una solución y pulse "
+                "«Marcar como vigente».",
+                "#C62828",
+            )
+            return False
+        self._base = self.repo.cargar_solucion(self._base_id).asignaciones if self._base_id else []
         self.boton_resultados.setVisible(False)
         self.boton_validacion.setVisible(False)
         self.caja_diagnostico.setVisible(False)
@@ -143,7 +184,7 @@ class PantallaGenerar(Pantalla):
             self.boton_validacion.setVisible(True)
             return False
         self._limite = float(tiempo_limite_s or datos.configuracion.tiempo_limite_s)
-        self.trabajador = TrabajadorResolucion(datos, tiempo_limite_s)
+        self.trabajador = TrabajadorResolucion(datos, tiempo_limite_s, self._base)
         self.trabajador.progreso.connect(self._al_progresar)
         self.trabajador.fase.connect(self.fase.setText)
         self.trabajador.terminado.connect(self._al_terminar)
@@ -154,6 +195,7 @@ class PantallaGenerar(Pantalla):
         self.barra.setValue(0)
         self._mostrar_mensaje("")
         self.boton_generar.setEnabled(False)
+        self.boton_reajustar.setEnabled(False)
         self.boton_cancelar.setEnabled(True)
         self._inicio = time.monotonic()
         self._reloj.start()
@@ -187,6 +229,7 @@ class PantallaGenerar(Pantalla):
         self.boton_generar.setEnabled(True)
         self.boton_cancelar.setEnabled(False)
         self.resolviendo.emit(False)
+        self.refrescar_botones()
 
     def _al_fallar(self, detalle: str) -> None:
         self._terminar_trabajo()
@@ -212,16 +255,23 @@ class PantallaGenerar(Pantalla):
                     estado=resultado.estado,
                     tiempo_s=round(resultado.tiempo_s, 2),
                     penalizaciones=resultado.penalizaciones,
+                    nota=f"Reajuste del horario #{self._base_id}" if self._base_id else "",
                     asignaciones=resultado.asignaciones,
                 )
             )
             self.ultima_solucion_id = guardada.id
             total = penalizacion_total(resultado.penalizaciones, self._pesos)
             self.mejor.setText(str(total))
-            self._mostrar_mensaje(
-                f"Solución #{guardada.id} verificada y guardada (penalización {total}).",
-                "#2E7D32",
-            )
+            texto = f"Solución #{guardada.id} verificada y guardada (penalización {total})."
+            if self._base_id is not None:
+                cambios = comparar(self._base, resultado.asignaciones)
+                texto += (
+                    f"\nRespecto al horario vigente #{self._base_id}: {len(cambios)} clase(s) "
+                    f"cambiada(s), {len(profesores_afectados(cambios))} profesor(es) "
+                    "afectado(s). Revise los cambios en Resultados y, si le convence, márquela "
+                    "como vigente."
+                )
+            self._mostrar_mensaje(texto, "#2E7D32")
             self.boton_resultados.setVisible(True)
             self.datos_cambiados.emit()
             return

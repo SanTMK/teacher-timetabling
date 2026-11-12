@@ -11,7 +11,7 @@ from ortools.sat.python import cp_model
 
 from timetabling.dominio.modelos import Asignacion, DatosEscuela, EstadoSolucion
 from timetabling.nucleo.modelo import ModeloHorario, construir_modelo
-from timetabling.nucleo.objetivo import construir_objetivo
+from timetabling.nucleo.objetivo import claves_base, construir_objetivo
 
 
 @dataclass(frozen=True)
@@ -76,8 +76,12 @@ class Resolutor:
         hilos: int | None = None,
         al_progresar: Callable[[Progreso], None] | None = None,
         semilla: int | None = None,
+        base: list[Asignacion] | None = None,
     ) -> None:
+        """``base`` es el horario vigente cuando se reajusta: se penaliza cada clase que
+        cambie (B9) y se usa como punto de partida de la búsqueda."""
         self.datos = datos
+        self.base = list(base or [])
         self.tiempo_limite_s = tiempo_limite_s or datos.configuracion.tiempo_limite_s
         self.hilos = hilos or datos.configuracion.hilos
         self.al_progresar = al_progresar
@@ -106,6 +110,7 @@ class Resolutor:
         """
         inicio = time.perf_counter()
         mh = construir_modelo(self.datos)
+        mh.base = self.base
         penalizaciones = construir_objetivo(mh)
         self.modelo = mh
         pesos = self.datos.configuracion.pesos.model_dump()
@@ -127,8 +132,12 @@ class Resolutor:
         if self.semilla is not None:
             parametros.random_seed = self.semilla
 
-        # Etapa 1: factibilidad
+        # Etapa 1: factibilidad (al reajustar, partiendo del horario vigente)
         mh.modelo.clear_objective()
+        if self.base:
+            vigentes = set(claves_base(mh))
+            for clave, var in mh.x.items():
+                mh.modelo.add_hint(var, clave in vigentes)
         parametros.max_time_in_seconds = max(1.0, restante())
         parametros.stop_after_first_solution = True
         estado_cp = self._solver.solve(
@@ -153,6 +162,7 @@ class Resolutor:
             )
 
         # Etapa 2: optimización a partir de la primera solución
+        mh.modelo.clear_hints()
         for var in mh.x.values():
             mh.modelo.add_hint(var, self._solver.boolean_value(var))
         mh.modelo.minimize(objetivo)
@@ -215,6 +225,7 @@ def resolver(
     tiempo_limite_s: float | None = None,
     hilos: int | None = None,
     al_progresar: Callable[[Progreso], None] | None = None,
+    base: list[Asignacion] | None = None,
 ) -> ResultadoResolucion:
     """Atajo para resolver sin necesidad de cancelar."""
-    return Resolutor(datos, tiempo_limite_s, hilos, al_progresar).resolver()
+    return Resolutor(datos, tiempo_limite_s, hilos, al_progresar, base=base).resolver()

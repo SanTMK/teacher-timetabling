@@ -140,7 +140,8 @@ CREATE TABLE soluciones (
     estado TEXT NOT NULL,
     tiempo_s REAL NOT NULL,
     penalizaciones TEXT NOT NULL,  -- JSON
-    nota TEXT NOT NULL DEFAULT ''
+    nota TEXT NOT NULL DEFAULT '',
+    vigente INTEGER NOT NULL DEFAULT 0  -- 1 en el horario que está en uso
 );
 
 CREATE TABLE asignaciones (

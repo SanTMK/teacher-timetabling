@@ -11,12 +11,13 @@ from pytestqt.qtbot import QtBot
 
 from timetabling.dominio.modelos import Disponibilidad, EstadoSolucion
 from timetabling.ejemplo import crear_proyecto_ejemplo
+from timetabling.exportacion.excel import OpcionesExportacion
 from timetabling.gui.app import VentanaPrincipal
 from timetabling.gui.pantallas.fijas import SOMBRA_NO_DISPONIBLE, PantallaFijas
 from timetabling.gui.pantallas.generar import PantallaGenerar
 from timetabling.gui.pantallas.resultados import PantallaResultados
 from timetabling.gui.widgets.arrastre import ROL_INFO, CuadriculaFijas, codificar
-from timetabling.gui.widgets.vista_horario import ICONO_FIJA
+from timetabling.gui.widgets.vista_horario import ICONO_CAMBIO, ICONO_FIJA
 from timetabling.nucleo.franjas import franjas_validas_profesor
 from timetabling.nucleo.verificador import verificar
 from timetabling.persistencia.repositorio import Repositorio
@@ -269,3 +270,78 @@ def test_clases_fijas_arrastrando_antes_de_generar(
         == (grupo.id, fija.asignatura_id, profesor.id, otra.dia, otra.indice)
         for a in solucion.asignaciones
     )
+
+
+def test_horario_vigente_y_reajuste(ventana: VentanaPrincipal, qtbot: QtBot) -> None:
+    repo = ventana.repo
+    assert repo is not None
+    generar = _generar(ventana, qtbot, limite=4)
+    assert not generar.boton_reajustar.isEnabled()  # aún no hay horario vigente
+    _esperar(qtbot, generar)
+    primera_id = generar.ultima_solucion_id
+    assert primera_id is not None
+
+    # Marcar como vigente desde Resultados
+    ventana.ver_solucion(primera_id)
+    resultados = ventana.pantallas["resultados"]
+    assert isinstance(resultados, PantallaResultados)
+    resultados.boton_vigente.click()
+    assert repo.solucion_vigente_id() == primera_id
+    assert resultados.selector.currentText().startswith("★ VIGENTE")
+    assert not resultados.boton_vigente.isEnabled()
+    assert not resultados.pestanas.isTabVisible(resultados.indice_cambios)
+
+    # Reajustar sin cambios en los datos: el horario se conserva
+    generar = ventana.mostrar("generar")
+    assert isinstance(generar, PantallaGenerar)
+    assert generar.boton_reajustar.isEnabled()
+    assert generar.generar(tiempo_limite_s=6, reajustar=True)
+    _esperar(qtbot, generar)
+    assert "0 clase(s) cambiada(s)" in generar.mensaje.text()
+    reajuste_id = generar.ultima_solucion_id
+    assert reajuste_id != primera_id
+    assert repo.cargar_solucion(reajuste_id).nota == f"Reajuste del horario #{primera_id}"
+
+    generar.boton_resultados.click()
+    assert resultados.solucion is not None and resultados.solucion.id == reajuste_id
+    assert resultados.pestanas.isTabVisible(resultados.indice_cambios)
+    assert resultados.pestanas.tabText(resultados.indice_cambios) == "Cambios (0)"
+    assert "0 clase(s) cambiada(s)" in resultados.resumen.text()
+
+    # Una solución con cambios se resalta en la vista y se lista en «Cambios»
+    vigente = repo.cargar_solucion(primera_id)
+    otra = vigente.asignaciones[0]
+    sustituto = next(p for p in repo.listar_profesores() if p.id != otra.profesor_id)
+    cambiadas = [
+        a.model_copy(update={"profesor_id": sustituto.id}) if a is otra else a
+        for a in vigente.asignaciones
+    ]
+    movida = repo.guardar_solucion(
+        vigente.model_copy(update={"id": None, "vigente": False, "asignaciones": cambiadas})
+    )
+    resultados.seleccionar_solucion(movida.id)
+    assert resultados.tabla_cambios.rowCount() == 1
+    assert resultados.tabla_cambios.item(0, 2).text() == "Cambio de profesor"
+    resultados.selector_grupo.setCurrentIndex(resultados.selector_grupo.findData(otra.grupo_id))
+    vista = resultados.vista_grupo
+    textos = [
+        vista.item(f, c).text()
+        for f in range(vista.rowCount())
+        for c in range(vista.columnCount())
+        if vista.item(f, c)
+    ]
+    assert sum(t.startswith(ICONO_CAMBIO) for t in textos) == 1
+    resultados.resaltar.setChecked(False)
+    assert not any(
+        vista.item(f, c).text().startswith(ICONO_CAMBIO)
+        for f in range(vista.rowCount())
+        for c in range(vista.columnCount())
+        if vista.item(f, c)
+    )
+
+    # (la solución hecha a mano puede tener choques: solo se exporta la hoja de cambios)
+    solo_cambios = OpcionesExportacion(
+        grupos=False, profesores=False, espacios=False, resumen=False
+    )
+    destino = resultados.exportar(Path(repo.ruta).with_name("cambios.xlsx"), solo_cambios)
+    assert "Cambios" in openpyxl.load_workbook(destino).sheetnames

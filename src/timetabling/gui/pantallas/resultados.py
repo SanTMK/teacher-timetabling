@@ -1,5 +1,6 @@
 """Creado con Claude. Pantalla Resultados: soluciones guardadas, vistas de horario, resúmenes,
-ajustes manuales (fijar/desfijar) y exportación a Excel."""
+ajustes manuales (fijar/desfijar), horario vigente, cambios respecto a él y exportación a
+Excel."""
 
 from __future__ import annotations
 
@@ -24,6 +25,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from timetabling.dominio.comparacion import (
+    ENCABEZADOS_CAMBIOS,
+    Cambio,
+    ClaveClase,
+    claves_cambiadas,
+    comparar,
+    filas_cambios,
+    profesores_afectados,
+)
 from timetabling.dominio.cuadricula import (
     cuadricula_espacio,
     cuadricula_grupo,
@@ -46,7 +56,7 @@ from timetabling.nucleo.franjas import generar_franjas
 
 
 class DialogoExportar(QDialog):
-    def __init__(self, padre: QWidget) -> None:
+    def __init__(self, padre: QWidget, con_cambios: bool = False) -> None:
         super().__init__(padre)
         self.setWindowTitle("Exportar a Excel")
         self.casillas = {
@@ -54,12 +64,15 @@ class DialogoExportar(QDialog):
             "profesores": QCheckBox("Una hoja por profesor"),
             "espacios": QCheckBox("Ocupación de espacios especiales"),
             "resumen": QCheckBox("Resumen y carga docente"),
+            "cambios": QCheckBox("Cambios respecto al horario vigente"),
         }
         capa = QVBoxLayout(self)
         capa.addWidget(QLabel("¿Qué desea incluir? (la leyenda de colores siempre se incluye)"))
         for casilla in self.casillas.values():
             casilla.setChecked(True)
             capa.addWidget(casilla)
+        self.casillas["cambios"].setVisible(con_cambios)
+        self.casillas["cambios"].setChecked(con_cambios)
         botones = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -94,9 +107,22 @@ class PantallaResultados(Pantalla):
         self.datos: DatosEscuela | None = None
         self.franjas: list[Franja] = []
         self.solucion: Solucion | None = None
+        # Horario vigente con el que se compara la solución elegida (si es otra).
+        self.vigente: Solucion | None = None
+        self.cambios: list[Cambio] = []
+        self.cambiadas: set[ClaveClase] = set()
 
         self.selector = QComboBox()
         self.selector.currentIndexChanged.connect(self._al_elegir_solucion)
+        self.boton_vigente = QPushButton("Marcar como vigente")
+        self.boton_vigente.setToolTip(
+            "El horario vigente es el que está en uso: las demás soluciones se comparan con "
+            "él, y «Reajustar» en Generar parte de él cambiando lo menos posible"
+        )
+        self.boton_vigente.clicked.connect(self.marcar_vigente)
+        self.resaltar = QCheckBox("Resaltar cambios respecto al vigente (↻)")
+        self.resaltar.setChecked(True)
+        self.resaltar.toggled.connect(self._actualizar_vistas)
         self.boton_eliminar = QPushButton("Eliminar solución")
         self.boton_eliminar.clicked.connect(self.eliminar_solucion)
         self.boton_exportar = QPushButton("Exportar a Excel…")
@@ -128,6 +154,14 @@ class PantallaResultados(Pantalla):
             vista.fijar_pedido.connect(self.fijar)
         self.tabla_penalizaciones = _tabla(["Restricción blanda", "Valor", "Peso", "Ponderado"])
         self.pestanas.addTab(self.tabla_penalizaciones, "Penalizaciones")
+        self.tabla_cambios = _tabla(ENCABEZADOS_CAMBIOS)
+        self.tabla_cambios.setSortingEnabled(False)
+        cabecera = self.tabla_cambios.horizontalHeader()
+        for columna, modo in enumerate(
+            [QHeaderView.ResizeMode.ResizeToContents] * 3 + [QHeaderView.ResizeMode.Stretch] * 2
+        ):
+            cabecera.setSectionResizeMode(columna, modo)
+        self.indice_cambios = self.pestanas.addTab(self.tabla_cambios, "Cambios")
         self.tabla_carga = _tabla(
             ["Profesor", "Minutos", "Máximo", "% de carga", "Días con clase", "Huecos"]
         )
@@ -136,12 +170,14 @@ class PantallaResultados(Pantalla):
         arriba = QHBoxLayout()
         arriba.addWidget(QLabel("Solución:"))
         arriba.addWidget(self.selector, 1)
+        arriba.addWidget(self.boton_vigente)
         arriba.addWidget(self.boton_eliminar)
         arriba.addWidget(self.boton_exportar)
         capa = QVBoxLayout(self)
         capa.addWidget(QLabel(f"<h2>{self.titulo}</h2>"))
         capa.addLayout(arriba)
         capa.addWidget(self.resumen)
+        capa.addWidget(self.resaltar)
         capa.addWidget(self.pestanas, 1)
         capa.addWidget(self.aviso_fijas)
 
@@ -158,10 +194,12 @@ class PantallaResultados(Pantalla):
         self.selector.clear()
         for s in soluciones:
             total = penalizacion_total(s.penalizaciones, pesos)
-            self.selector.addItem(
-                f"#{s.id} · {s.fecha:%d/%m/%Y %H:%M} · {s.estado.value} · penalización {total}",
-                s.id,
-            )
+            texto = f"#{s.id} · {s.fecha:%d/%m/%Y %H:%M} · {s.estado.value} · penalización {total}"
+            if s.nota:
+                texto += f" · {s.nota}"
+            self.selector.addItem(f"★ VIGENTE · {texto}" if s.vigente else texto, s.id)
+        if actual is None:
+            actual = next((s.id for s in soluciones if s.vigente), None)
         indice = self.selector.findData(actual) if actual is not None else 0
         self.selector.setCurrentIndex(max(indice, 0))
         self.selector.blockSignals(False)
@@ -196,6 +234,18 @@ class PantallaResultados(Pantalla):
         solucion_id = self.selector.currentData()
         self.solucion = self.repo.cargar_solucion(solucion_id) if solucion_id else None
         hay = self.solucion is not None
+        vigente_id = self.repo.solucion_vigente_id()
+        self.vigente = None
+        if hay and vigente_id is not None and vigente_id != solucion_id:
+            self.vigente = self.repo.cargar_solucion(vigente_id)
+        base = self.vigente.asignaciones if self.vigente else []
+        nueva = self.solucion.asignaciones if self.solucion else []
+        self.cambios = comparar(base, nueva) if self.vigente else []
+        self.cambiadas = claves_cambiadas(base, nueva) if self.vigente else set()
+        self.resaltar.setVisible(self.vigente is not None)
+        self.pestanas.setTabVisible(self.indice_cambios, self.vigente is not None)
+        self.pestanas.setTabText(self.indice_cambios, f"Cambios ({len(self.cambios)})")
+        self.boton_vigente.setEnabled(hay and not (self.solucion and self.solucion.vigente))
         self.boton_eliminar.setEnabled(hay)
         self.boton_exportar.setEnabled(hay)
         self.pestanas.setEnabled(hay)
@@ -209,6 +259,21 @@ class PantallaResultados(Pantalla):
                 f"Estado: <b>{s.estado.value}</b> · generada el {s.fecha:%d/%m/%Y %H:%M} · "
                 f"tiempo de cómputo {s.tiempo_s:.1f} s · penalización total <b>{total}</b>"
             )
+            if s.vigente:
+                self.resumen.setText(self.resumen.text() + "<br>★ Este es el horario vigente.")
+            elif self.vigente is not None:
+                afectados = len(profesores_afectados(self.cambios))
+                self.resumen.setText(
+                    self.resumen.text() + f"<br>Respecto al horario vigente #{self.vigente.id}: "
+                    f"<b>{len(self.cambios)} clase(s) cambiada(s)</b>, "
+                    f"{afectados} profesor(es) afectado(s). Vea la pestaña «Cambios»."
+                )
+            else:
+                self.resumen.setText(
+                    self.resumen.text()
+                    + "<br>Aún no hay horario vigente. Si este es el que se usa en la escuela, "
+                    "pulse «Marcar como vigente»."
+                )
         self._actualizar_vistas()
         self._actualizar_tablas()
 
@@ -226,6 +291,7 @@ class PantallaResultados(Pantalla):
             return
         asignaciones = self.solucion.asignaciones if self.solucion else []
         fijas = self._fijas()
+        cambiadas = self.cambiadas if self.resaltar.isChecked() else set()
         n = len(self.datos.asignaciones_fijas)
         self.aviso_fijas.setText(
             f"{n} clase(s) fija(s): se respetarán al generar de nuevo. "
@@ -233,20 +299,28 @@ class PantallaResultados(Pantalla):
         )
         if (g := self.selector_grupo.currentData()) is not None:
             self.vista_grupo.mostrar(
-                cuadricula_grupo(self.datos, self.franjas, asignaciones, g), fijas
+                cuadricula_grupo(self.datos, self.franjas, asignaciones, g), fijas, cambiadas
             )
         if (p := self.selector_profesor.currentData()) is not None:
             self.vista_profesor.mostrar(
-                cuadricula_profesor(self.datos, self.franjas, asignaciones, p), fijas
+                cuadricula_profesor(self.datos, self.franjas, asignaciones, p), fijas, cambiadas
             )
         if (e := self.selector_espacio.currentData()) is not None:
             tipo, nivel_id = e
             self.vista_espacio.mostrar(
-                cuadricula_espacio(self.datos, self.franjas, asignaciones, tipo, nivel_id), fijas
+                cuadricula_espacio(self.datos, self.franjas, asignaciones, tipo, nivel_id),
+                fijas,
+                cambiadas,
             )
 
     def _actualizar_tablas(self) -> None:
         assert self.datos is not None
+        self.tabla_cambios.setRowCount(0)
+        filas = filas_cambios(self.datos, self.franjas, self.cambios)
+        self.tabla_cambios.setRowCount(len(filas))
+        for fila, valores in enumerate(filas):
+            for columna, dato in enumerate(valores):
+                self.tabla_cambios.setItem(fila, columna, _celda(dato))
         for tabla in (self.tabla_penalizaciones, self.tabla_carga):
             tabla.setSortingEnabled(False)
             tabla.setRowCount(0)
@@ -294,6 +368,20 @@ class PantallaResultados(Pantalla):
 
     # --- Gestión de soluciones y exportación ----------------------------------------
 
+    def marcar_vigente(self) -> None:
+        if self.solucion is None or self.repo is None:
+            return
+        anterior = self.repo.solucion_vigente_id()
+        if anterior is not None and not self.confirmar(
+            "Marcar como vigente",
+            f"La solución #{self.solucion.id} pasará a ser el horario vigente en lugar de "
+            f"la #{anterior}. ¿Continuar?",
+        ):
+            return
+        self.repo.marcar_vigente(self.solucion.id)
+        self.datos_cambiados.emit()
+        self.refrescar(self.solucion.id)
+
     def eliminar_solucion(self) -> bool:
         if self.solucion is None or self.repo is None:
             return False
@@ -308,7 +396,7 @@ class PantallaResultados(Pantalla):
     def _dialogo_exportar(self) -> None:
         if self.solucion is None:
             return
-        dialogo = DialogoExportar(self)
+        dialogo = DialogoExportar(self, con_cambios=self.vigente is not None)
         if dialogo.exec() != QDialog.DialogCode.Accepted:
             return
         ruta, _ = QFileDialog.getSaveFileName(
@@ -327,4 +415,5 @@ class PantallaResultados(Pantalla):
         assert self.datos is not None and self.solucion is not None
         if ruta.suffix.lower() != ".xlsx":
             ruta = ruta.with_suffix(".xlsx")
-        return exportar_excel(self.datos, self.solucion, self.franjas, ruta, opciones)
+        cambios = self.cambios if self.vigente is not None else None
+        return exportar_excel(self.datos, self.solucion, self.franjas, ruta, opciones, cambios)

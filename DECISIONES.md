@@ -237,3 +237,27 @@ Creado con Claude. Registro de las decisiones que la especificación no cubre o 
   disponible, naranja si preferiría no, rojo si ya tiene una fija en otro grupo que se
   traslapa (con el margen de traslado).
 - Nueva validación: más fijas de una asignatura en un grupo que sus horas semanales.
+
+## Horario vigente y reajuste con cambios mínimos
+
+- Columna `soluciones.vigente` (esquema v5): marca el horario en uso; `marcar_vigente` deja
+  una sola. Al borrar la solución vigente simplemente no queda ninguna.
+- **Reajustar** (pantalla Generar) resuelve con los datos actuales y el horario vigente como
+  `base`. La base se usa como pista (`add_hint`) en la etapa de factibilidad y agrega la
+  penalización **B9**: por cada clase vigente, 1 si no se conserva idéntica (`1 − x`) y otro
+  1 si su grupo deja de tener esa asignatura a esa hora (`1 − z`). Así, cambiar solo el
+  profesor cuesta 1 y mover la clase de hora cuesta 2: ante una sustitución se conservan las
+  horas. Lo que ya no es posible (sin variable) cuenta como constante. Peso por defecto 20,
+  mayor que cualquier otra blanda, para que no se mueva una clase por ganar un hueco.
+- Es una penalización blanda y no clases fijas: un reajuste nunca vuelve infactible el
+  problema por culpa del horario anterior. B9 no se construye al generar desde cero.
+- La comparación (`dominio/comparacion.py`) es independiente del solver: empareja, por grupo
+  y asignatura, las clases que solo están en un horario (misma hora → cambio de profesor;
+  mismo profesor → cambio de hora; el resto en orden). La usan Generar (mensaje), Resultados
+  (↻ en las vistas, pestaña «Cambios») y la exportación (hoja «Cambios»).
+- Resultados abre por defecto el horario vigente y compara cualquier otra solución con él.
+  La nota de cada reajuste guarda de qué horario partió.
+- Pendiente: al **eliminar** un profesor, `ON DELETE CASCADE` borra sus clases del horario
+  vigente; el reajuste las vuelve a acomodar, pero la comparación las muestra como «clase
+  agregada» en vez de «cambio de profesor». Se recomienda editar al profesor.
+

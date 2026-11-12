@@ -1,4 +1,4 @@
-"""Creado con Claude. Restricciones blandas (penalizaciones ponderadas B1–B8)."""
+"""Creado con Claude. Restricciones blandas (penalizaciones ponderadas B1–B9)."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ def construir_objetivo(mh: ModeloHorario) -> dict[str, Expr]:
         "desequilibrio_carga": _b6_desequilibrio_carga,
         "titular_preescolar": _b7_titular_preescolar,
         "bloque_doble_preferido": _b8_bloque_doble_preferido,
+        "cambios_vigente": _b9_cambios_vigente,
     }
     penalizaciones: dict[str, Expr] = {}
     for nombre, construir in constructores.items():
@@ -42,6 +43,28 @@ def construir_objetivo(mh: ModeloHorario) -> dict[str, Expr]:
             )
         )
     return penalizaciones
+
+
+def claves_base(mh: ModeloHorario) -> list[tuple[int, int, int, str]]:
+    """Clases del horario vigente como claves de ``x`` (existan o no en el modelo)."""
+    return [(a.grupo_id, a.asignatura_id, a.profesor_id, a.franja_id) for a in mh.base]
+
+
+def _b9_cambios_vigente(mh: ModeloHorario) -> list[Expr]:
+    """Clases del horario vigente que no se conservan igual.
+
+    Cambiar solo el profesor cuenta 1; cambiar la hora cuenta 2 (1 por la hora y 1 por la
+    clase), para que ante una sustitución se conserven las horas. Las combinaciones que ya
+    no son posibles (p. ej. el profesor dejó de estar disponible) no tienen variable y
+    cuentan siempre como cambio.
+    """
+    terminos: list[Expr] = []
+    for g, a, p, s in claves_base(mh):
+        x = mh.x.get((g, a, p, s))
+        z = mh.z.get((g, a, s))
+        terminos.append(1 - x if x is not None else 1)
+        terminos.append(1 - z if z is not None else 1)
+    return terminos
 
 
 def _b1_huecos_profesor(mh: ModeloHorario) -> list[Expr]:
