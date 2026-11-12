@@ -53,5 +53,11 @@ def carga_docente(
 
 
 def penalizacion_total(penalizaciones: dict[str, int], pesos: Pesos) -> int:
+    """Calidad del horario. No incluye B9 (cambios respecto al vigente), que solo guía el
+    reajuste: así un reajuste y un horario hecho desde cero se pueden comparar."""
     valores = pesos.model_dump()
-    return sum(valores.get(nombre, 0) * valor for nombre, valor in penalizaciones.items())
+    return sum(
+        valores.get(nombre, 0) * valor
+        for nombre, valor in penalizaciones.items()
+        if nombre != "cambios_vigente"
+    )

@@ -71,6 +71,25 @@ También puede ajustar después de generar: en **Resultados**, haga **clic derec
 Vuelva a **Generar**: el nuevo horario respetará las clases fijas y acomodará lo demás.
 Para quitarla, clic derecho → **Desfijar esta clase**.
 
+### Reajustar un horario que ya está en uso
+
+Cuando la escuela ya trabaja con un horario y cambia algo (llega un profesor sustituto,
+alguien deja de poder ciertos días, se agrega un grupo…), no hace falta fijar clase por clase:
+
+1. En **Resultados**, elija el horario que se está usando y pulse **Marcar como vigente**
+   (aparece «★ VIGENTE» en la lista). Solo hay uno a la vez.
+2. Haga los cambios en los datos (por ejemplo, en **Profesores**). Si un profesor se va,
+   conviene **editarlo** (cambiar nombre y disponibilidad por los del sustituto) en lugar de
+   eliminarlo: al eliminarlo se borran sus clases de los horarios guardados.
+3. En **Generar**, pulse **Reajustar horario vigente**. El programa parte del horario
+   vigente y cambia **lo menos posible**: primero intenta conservar las horas cambiando solo
+   el profesor; mover una clase de hora le cuesta el doble. El peso de esta preferencia es
+   *B9* en Configuración (súbalo si quiere todavía menos movimiento).
+4. En **Resultados** verá cuántas clases cambiaron y a cuántos profesores afecta. Las clases
+   cambiadas aparecen con **↻** en negrita, y la pestaña **Cambios** las lista (antes →
+   después). **Exportar a Excel…** incluye una hoja «Cambios» para avisar a los afectados.
+5. Si le convence, pulse **Marcar como vigente** sobre la nueva solución.
+
 ### Si no se encuentra horario
 
 Si es imposible cumplir todo (por ejemplo, un profesor tiene muy poca disponibilidad para las

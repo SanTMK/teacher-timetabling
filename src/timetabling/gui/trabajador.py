@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 from PySide6.QtCore import QThread, Signal
 
-from timetabling.dominio.modelos import DatosEscuela, EstadoSolucion
+from timetabling.dominio.modelos import Asignacion, DatosEscuela, EstadoSolucion
 from timetabling.nucleo.diagnostico import Conflicto, diagnosticar
 from timetabling.nucleo.resolver import Progreso, Resolutor, ResultadoResolucion
 from timetabling.nucleo.verificador import Violacion, verificar
@@ -32,10 +32,20 @@ class TrabajadorResolucion(QThread):
     terminado = Signal(object)  # ResultadoTrabajo
     fallo = Signal(str)
 
-    def __init__(self, datos: DatosEscuela, tiempo_limite_s: float | None = None) -> None:
+    def __init__(
+        self,
+        datos: DatosEscuela,
+        tiempo_limite_s: float | None = None,
+        base: list[Asignacion] | None = None,
+    ) -> None:
         super().__init__()
         self.datos = datos.model_copy(deep=True)
-        self.resolutor = Resolutor(self.datos, tiempo_limite_s, al_progresar=self._al_progresar)
+        self.resolutor = Resolutor(
+            self.datos,
+            tiempo_limite_s,
+            al_progresar=self._al_progresar,
+            base=[a.model_copy() for a in base or []],
+        )
 
     def _al_progresar(self, progreso: Progreso) -> None:
         self.progreso.emit(progreso)

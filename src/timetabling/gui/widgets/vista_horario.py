@@ -2,7 +2,7 @@
 
 Misma lógica visual que la exportación: color por asignatura, recesos en gris y escala de
 tiempo proporcional para profesores multinivel. Menú contextual para fijar o desfijar una
-clase; las fijas se marcan con 📌.
+clase; las fijas se marcan con 📌 y las que cambiaron respecto al horario vigente con ↻.
 """
 
 from __future__ import annotations
@@ -12,11 +12,13 @@ from PySide6.QtGui import QAction, QBrush, QColor
 from PySide6.QtWidgets import QHeaderView, QMenu, QTableWidget, QTableWidgetItem
 
 from timetabling.dominio.colores import color_texto
+from timetabling.dominio.comparacion import ClaveClase, clave
 from timetabling.dominio.cuadricula import Cuadricula
 from timetabling.dominio.modelos import NOMBRES_DIAS, Asignacion
 
 ROL_ASIGNACIONES = Qt.ItemDataRole.UserRole
 ICONO_FIJA = "📌"
+ICONO_CAMBIO = "↻"
 GRIS_RECESO = "#D9D9D9"
 ALTO_FRANJA = 46
 ALTO_RECESO = 20
@@ -46,7 +48,14 @@ class VistaHorario(QTableWidget):
         self.permite_fijar = True
         self.cuadricula: Cuadricula | None = None
 
-    def mostrar(self, cuadricula: Cuadricula, fijas: set[tuple[int, int, str, int]]) -> None:
+    def mostrar(
+        self,
+        cuadricula: Cuadricula,
+        fijas: set[tuple[int, int, str, int]],
+        cambiadas: set[ClaveClase] | None = None,
+    ) -> None:
+        """``cambiadas``: clases que no estaban igual en el horario vigente (se resaltan)."""
+        cambiadas = cambiadas or set()
         self.cuadricula = cuadricula
         self.fijas = fijas
         self.clearSpans()
@@ -80,13 +89,23 @@ class VistaHorario(QTableWidget):
             self.verticalHeader().setFont(fuente)
         for bloque in cuadricula.bloques:
             fija = any(clave_clase(a) in fijas for a in bloque.asignaciones)
+            cambio = any(clave(a) in cambiadas for a in bloque.asignaciones)
             texto = bloque.titulo + (f"\n{bloque.detalle}" if bloque.detalle else "")
-            item = QTableWidgetItem(f"{ICONO_FIJA} {texto}" if fija else texto)
+            marcas = (ICONO_CAMBIO if cambio else "") + (ICONO_FIJA if fija else "")
+            item = QTableWidgetItem(f"{marcas} {texto}" if marcas else texto)
+            if cambio:
+                fuente = item.font()
+                fuente.setBold(True)
+                item.setFont(fuente)
             item.setBackground(QBrush(QColor(bloque.color)))
             item.setForeground(QBrush(QColor(color_texto(bloque.color))))
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             item.setData(ROL_ASIGNACIONES, bloque.asignaciones)
-            item.setToolTip(texto + ("\n(clase fija)" if fija else "\nClic derecho para fijarla"))
+            item.setToolTip(
+                texto
+                + ("\n(cambió respecto al horario vigente)" if cambio else "")
+                + ("\n(clase fija)" if fija else "\nClic derecho para fijarla")
+            )
             self.setItem(bloque.fila, bloque.columna, item)
             if bloque.filas > 1:
                 self.setSpan(bloque.fila, bloque.columna, bloque.filas, 1)

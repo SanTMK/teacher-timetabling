@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from ortools.sat.python import cp_model
 
 from timetabling.dominio.modelos import (
+    Asignacion,
     BloqueDoble,
     DatosEscuela,
     Franja,
@@ -61,6 +62,8 @@ class ModeloHorario:
     y: dict[tuple[int, int, int], cp_model.IntVar] = field(default_factory=dict)
     suposiciones: dict[Clave, cp_model.IntVar] = field(default_factory=dict)
     con_suposiciones: bool = False
+    # Horario vigente del que parte un reajuste (vacío al generar desde cero).
+    base: list[Asignacion] = field(default_factory=list)
 
     # Índices de x
     por_ga: dict[tuple[int, int], list[ClaveX]] = field(default_factory=lambda: defaultdict(list))

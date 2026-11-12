@@ -704,6 +704,7 @@ class Repositorio:
             tiempo_s=fila["tiempo_s"],
             penalizaciones=json.loads(fila["penalizaciones"]),
             nota=fila["nota"],
+            vigente=bool(fila["vigente"]),
             asignaciones=asignaciones,
         )
 
@@ -737,6 +738,15 @@ class Repositorio:
     def actualizar_nota_solucion(self, solucion_id: int, nota: str) -> None:
         with self._cx:
             self._ejecutar("UPDATE soluciones SET nota = ? WHERE id = ?", (nota, solucion_id))
+
+    def marcar_vigente(self, solucion_id: int | None) -> None:
+        """Marca una solución como el horario en uso (solo puede haber una)."""
+        with self._cx:
+            self._ejecutar("UPDATE soluciones SET vigente = (id IS ?)", (solucion_id,))
+
+    def solucion_vigente_id(self) -> int | None:
+        fila = self._ejecutar("SELECT id FROM soluciones WHERE vigente = 1").fetchone()
+        return int(fila[0]) if fila else None
 
     def eliminar_solucion(self, solucion_id: int) -> None:
         self._eliminar("soluciones", solucion_id)

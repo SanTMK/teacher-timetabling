@@ -88,7 +88,7 @@ def _validar_nombre(valor: str) -> str:
 
 
 class Pesos(_Base):
-    """Pesos de las restricciones blandas B1–B8."""
+    """Pesos de las restricciones blandas B1–B9."""
 
     huecos_profesor: int = Field(10, ge=0)
     distribucion_semanal: int = Field(8, ge=0)
@@ -98,6 +98,8 @@ class Pesos(_Base):
     desequilibrio_carga: int = Field(1, ge=0)
     titular_preescolar: int = Field(5, ge=0)
     bloque_doble_preferido: int = Field(4, ge=0)
+    # Solo cuenta al reajustar un horario vigente.
+    cambios_vigente: int = Field(20, ge=0)
 
 
 NOMBRES_PENALIZACIONES: dict[str, str] = {
@@ -109,6 +111,7 @@ NOMBRES_PENALIZACIONES: dict[str, str] = {
     "desequilibrio_carga": "B6 Desequilibrio de carga",
     "titular_preescolar": "B7 Preescolar sin su titular",
     "bloque_doble_preferido": "B8 Horas no emparejadas (bloque doble preferido)",
+    "cambios_vigente": "B9 Cambios respecto al horario vigente (al reajustar)",
 }
 
 
@@ -386,6 +389,7 @@ class Solucion(_Base):
     tiempo_s: float = 0.0
     penalizaciones: dict[str, int] = Field(default_factory=dict)
     nota: str = ""
+    vigente: bool = False
     asignaciones: list[Asignacion] = Field(default_factory=list)
 
 
